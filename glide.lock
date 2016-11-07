@@ -1,7 +1,7 @@
 hash: cf5040883846897ba61ac4df2d746c12991dca32d3b6701221cc059d505788db
 updated: 2016-11-07T05:50:46.114642468Z
 imports:
-- name: github.com/codegangsta/cli
+- name: github.com/urfave/cli
   version: d86a009f5e13f83df65d0d6cee9a2e3f1445f0da
 - name: github.com/go-stack/stack
   version: 100eb0c0a9c5b306ca2fb4f165df21d80ada4b82
