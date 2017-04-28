@@ -41,3 +41,9 @@ func maxInt8(a, b int8) int8 {
 	}
 	return b
 }
+func maxInt16(a, b int16) int16 {
+	if a > b {
+		return a
+	}
+	return b
+}
