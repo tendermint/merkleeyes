@@ -7,9 +7,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tendermint/abci/server"
-	. "github.com/tendermint/tmlibs/common"
 	"github.com/tendermint/merkleeyes/app"
 	eyes "github.com/tendermint/merkleeyes/client"
+	. "github.com/tendermint/tmlibs/common"
 )
 
 var tmspAddr = "tcp://127.0.0.1:46659"
@@ -58,7 +58,7 @@ func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence
 		// Set foo=FOO
 		set(t, cli, "foo", "FOO")
 
-		commit(t, cli, "68DECA470D80183B5E979D167E3DD0956631A952")
+		commit(t, cli, "882E25CAC42D1C6F45EDBBCEC66B08303DF9A38E")
 		get(t, cli, "foo", "FOO")
 		get(t, cli, "foa", "")
 		get(t, cli, "foz", "")
@@ -76,7 +76,7 @@ func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence
 		set(t, cli, "foo1", "4")
 		// nothing commited yet...
 		get(t, cli, "foo1", "")
-		commit(t, cli, "45B7F856A16CB2F8BB9A4A25587FC71D062BD631")
+		commit(t, cli, "548A1A7FE60D0D1414E65B385E9796D99E00B316")
 		// now we got info
 		get(t, cli, "foo1", "4")
 		get(t, cli, "foo2", "2")

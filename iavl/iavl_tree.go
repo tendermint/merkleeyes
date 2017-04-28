@@ -25,6 +25,7 @@ var deletesKey = []byte("go-merkle.deletes")  // Database key for roots to be pr
 // Fixed number of versions
 const rootsMax = 3
 
+// TODO: Debugging, remove
 var lastId = 0
 
 /*
@@ -284,6 +285,7 @@ func (t *IAVLTree) HashWithCount() ([]byte, int) {
 
 // Save this version of the tree
 func (t *IAVLTree) Save() []byte {
+
 	//t.ndb.mtx.Lock()
 	//defer t.ndb.mtx.Unlock()
 
@@ -292,10 +294,17 @@ func (t *IAVLTree) Save() []byte {
 
 	// Might be the same
 	first := t.roots.Front()
+	if first == nil {
+		// Empty list
+		return nil
+	}
+
 	firstNode := first.Value.(*IAVLNode)
 
 	if firstNode == nil {
+		// Null root
 		return nil
+
 	} else if t.ndb != nil {
 		firstNode.save(t)
 	}
