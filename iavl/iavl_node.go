@@ -2,21 +2,22 @@ package iavl
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 
 	"golang.org/x/crypto/ripemd160"
 
-	. "github.com/tendermint/tmlibs/common"
-	"github.com/tendermint/go-wire"
+	wire "github.com/tendermint/go-wire"
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
-// Node
-
+// Leaf and Inner nodes for an IAVLTree
 type IAVLNode struct {
 	key       []byte
 	value     []byte
 	height    int8
-	size      int
+	size      int // In internal, it's the number of leafs
+	version   int
 	hash      []byte
 	leftHash  []byte
 	leftNode  *IAVLNode
@@ -25,12 +26,18 @@ type IAVLNode struct {
 	persisted bool
 }
 
-func NewIAVLNode(key []byte, value []byte) *IAVLNode {
+func (n *IAVLNode) Sprintf() string {
+	return fmt.Sprintf("[%X/%X] (%d,%d,%d) %X,%X,%X -- %p,%p", n.key, n.value, n.version, n.height, n.size,
+		n.hash, n.leftHash, n.rightHash, n.leftNode, n.rightNode)
+}
+
+func NewIAVLNode(key []byte, value []byte, version int) *IAVLNode {
 	return &IAVLNode{
-		key:    key,
-		value:  value,
-		height: 0,
-		size:   1,
+		key:     key,
+		value:   value,
+		version: version,
+		height:  0,
+		size:    1,
 	}
 }
 
@@ -42,20 +49,30 @@ func MakeIAVLNode(buf []byte, t *IAVLTree) (node *IAVLNode, err error) {
 	// node header
 	node.height = int8(buf[0])
 	buf = buf[1:]
+
 	var n int
 	node.size, n, err = wire.GetVarint(buf)
 	if err != nil {
 		return nil, err
 	}
 	buf = buf[n:]
+
 	node.key, n, err = wire.GetByteSlice(buf)
 	if err != nil {
 		return nil, err
 	}
 	buf = buf[n:]
+
 	if node.height == 0 {
 		// value
 		node.value, n, err = wire.GetByteSlice(buf)
+		if err != nil {
+			return nil, err
+		}
+		buf = buf[n:]
+
+		// version
+		node.version, n, err = wire.GetVarint(buf)
 		if err != nil {
 			return nil, err
 		}
@@ -80,7 +97,7 @@ func MakeIAVLNode(buf []byte, t *IAVLTree) (node *IAVLNode, err error) {
 
 func (node *IAVLNode) _copy() *IAVLNode {
 	if node.height == 0 {
-		PanicSanity("Why are you copying a value node?")
+		cmn.PanicSanity("Why are you copying a value node?")
 	}
 	return &IAVLNode{
 		key:       node.key,
@@ -95,11 +112,16 @@ func (node *IAVLNode) _copy() *IAVLNode {
 	}
 }
 
+// has checks to see if the tree contains a given key
 func (node *IAVLNode) has(t *IAVLTree, key []byte) (has bool) {
+
+	// Key is in a leaf or inner node
 	if bytes.Compare(node.key, key) == 0 {
 		return true
 	}
+
 	if node.height == 0 {
+		// Hit a leaf without finding the key
 		return false
 	} else {
 		if bytes.Compare(key, node.key) < 0 {
@@ -110,6 +132,97 @@ func (node *IAVLNode) has(t *IAVLTree, key []byte) (has bool) {
 	}
 }
 
+// validate that the Node struct is setup correct, as it traverses.
+func (node *IAVLNode) validate(t *IAVLTree) {
+	if node == nil {
+		return
+	}
+	if node.height == 0 {
+		if len(node.key) == 0 {
+			fmt.Printf("%s\n", nodeMapping(node))
+			panic("Internal Key is empty")
+		}
+		if node.persisted && t.ndb == nil {
+			panic("Persisted node in memdb")
+		}
+		if node.persisted && node.hash == nil {
+			fmt.Printf("%s\n", nodeMapping(node))
+			panic("Persisted but not hashed")
+		}
+	} else {
+		if len(node.value) != 0 {
+			fmt.Printf("%s\n", nodeMapping(node))
+			panic("Value stored in an internal node")
+		}
+
+		if node.persisted && t.ndb == nil {
+			panic("Persisted node in memdb")
+		}
+
+		var right, left *IAVLNode
+		if node.persisted {
+			if node.leftHash == nil || node.rightHash == nil {
+				fmt.Printf("Persisted children are missing: %s\n", nodeMapping(node))
+				panic("Persistent children are missing")
+			}
+			if t.ndb == nil {
+				panic("Can not Persistent in memdb")
+			}
+
+			if node.leftNode == nil && node.leftHash != nil {
+				//left = t.ndb.GetNode(t, node.leftHash)
+			} else {
+				left = node.leftNode
+			}
+
+			if node.rightNode == nil && node.rightHash != nil {
+				//right = t.ndb.GetNode(t, node.rightHash)
+			} else {
+				right = node.rightNode
+			}
+
+		} else {
+			if node.leftNode == nil && node.leftHash == nil {
+				fmt.Printf("In-memory left is missing: %s\n", nodeMapping(node))
+				fmt.Printf("%p %p\n", node.leftNode, node.rightNode)
+				panic("In-memory left is missing")
+			}
+			if node.rightNode == nil && node.rightHash == nil {
+				fmt.Printf("In-memory right is missing: %s\n", nodeMapping(node))
+				fmt.Printf("%p %p\n", node.leftNode, node.rightNode)
+				panic("In-memory right is missing")
+			}
+			left = node.leftNode
+			right = node.rightNode
+		}
+
+		if left != nil {
+			left.validate(t)
+		}
+		if right != nil {
+			right.validate(t)
+		}
+		if left == nil || right == nil {
+			return
+		}
+
+		if node.size != left.size+right.size {
+			fmt.Printf("%s\n", nodeMapping(node))
+			fmt.Printf("%s\n", nodeMapping(left))
+			fmt.Printf("%s\n", nodeMapping(right))
+			panic("Size is wrong")
+		}
+		if node.height != left.height+1 && node.height != right.height+1 {
+			fmt.Printf("%s\n", nodeMapping(node))
+			fmt.Printf("%s\n", nodeMapping(left))
+			fmt.Printf("%s\n", nodeMapping(right))
+			fmt.Printf("%d = %d + 1 || %d + 1\n", node.height, left.height, right.height)
+			panic("Height is wrong")
+		}
+	}
+}
+
+// get the leaf node with the given key
 func (node *IAVLNode) get(t *IAVLTree, key []byte) (index int, value []byte, exists bool) {
 	if node.height == 0 {
 		cmp := bytes.Compare(node.key, key)
@@ -132,12 +245,13 @@ func (node *IAVLNode) get(t *IAVLTree, key []byte) (index int, value []byte, exi
 	}
 }
 
+// getByIndex returns the key/value in the ith leaf position
 func (node *IAVLNode) getByIndex(t *IAVLTree, index int) (key []byte, value []byte) {
 	if node.height == 0 {
 		if index == 0 {
 			return node.key, node.value
 		} else {
-			PanicSanity("getByIndex asked for invalid index")
+			cmn.PanicSanity("getByIndex asked for invalid index")
 			return nil, nil
 		}
 	} else {
@@ -162,7 +276,7 @@ func (node *IAVLNode) hashWithCount(t *IAVLTree) ([]byte, int) {
 	buf := new(bytes.Buffer)
 	_, hashCount, err := node.writeHashBytes(t, buf)
 	if err != nil {
-		PanicCrisis(err)
+		cmn.PanicCrisis(err)
 	}
 	hasher.Write(buf.Bytes())
 	node.hash = hasher.Sum(nil)
@@ -181,6 +295,7 @@ func (node *IAVLNode) writeHashBytes(t *IAVLTree, w io.Writer) (n int, hashCount
 		// key & value
 		wire.WriteByteSlice(node.key, w, &n, &err)
 		wire.WriteByteSlice(node.value, w, &n, &err)
+		wire.WriteVarint(node.version, w, &n, &err)
 	} else {
 		// left
 		if node.leftNode != nil {
@@ -189,7 +304,7 @@ func (node *IAVLNode) writeHashBytes(t *IAVLTree, w io.Writer) (n int, hashCount
 			hashCount += leftCount
 		}
 		if node.leftHash == nil {
-			PanicSanity("node.leftHash was nil in writeHashBytes")
+			cmn.PanicSanity("node.leftHash was nil in writeHashBytes")
 		}
 		wire.WriteByteSlice(node.leftHash, w, &n, &err)
 		// right
@@ -199,7 +314,7 @@ func (node *IAVLNode) writeHashBytes(t *IAVLTree, w io.Writer) (n int, hashCount
 			hashCount += rightCount
 		}
 		if node.rightHash == nil {
-			PanicSanity("node.rightHash was nil in writeHashBytes")
+			cmn.PanicSanity("node.rightHash was nil in writeHashBytes")
 		}
 		wire.WriteByteSlice(node.rightHash, w, &n, &err)
 	}
@@ -242,47 +357,58 @@ func (node *IAVLNode) writePersistBytes(t *IAVLTree, w io.Writer) (n int, err er
 	if node.height == 0 {
 		// value
 		wire.WriteByteSlice(node.value, w, &n, &err)
+		wire.WriteVarint(node.version, w, &n, &err)
+
 	} else {
 		// left
 		if node.leftHash == nil {
-			PanicSanity("node.leftHash was nil in writePersistBytes")
+			cmn.PanicSanity("node.leftHash was nil in writePersistBytes")
 		}
 		wire.WriteByteSlice(node.leftHash, w, &n, &err)
 		// right
 		if node.rightHash == nil {
-			PanicSanity("node.rightHash was nil in writePersistBytes")
+			cmn.PanicSanity("node.rightHash was nil in writePersistBytes")
 		}
 		wire.WriteByteSlice(node.rightHash, w, &n, &err)
 	}
 	return
 }
 
+// set the leaf and internal nodes.
 func (node *IAVLNode) set(t *IAVLTree, key []byte, value []byte) (newSelf *IAVLNode, updated bool) {
 	if node.height == 0 {
 		cmp := bytes.Compare(key, node.key)
 		if cmp < 0 {
+			// Add to the left
 			return &IAVLNode{
 				key:       node.key,
 				height:    1,
 				size:      2,
-				leftNode:  NewIAVLNode(key, value),
+				leftNode:  NewIAVLNode(key, value, t.version),
 				rightNode: node,
 			}, false
 		} else if cmp == 0 {
+			// Replace an existing node
 			removeOrphan(t, node)
-			return NewIAVLNode(key, value), true
+			return NewIAVLNode(key, value, t.version), true
 		} else {
+			// Add to the right
 			return &IAVLNode{
 				key:       key,
 				height:    1,
 				size:      2,
 				leftNode:  node,
-				rightNode: NewIAVLNode(key, value),
+				rightNode: NewIAVLNode(key, value, t.version),
 			}, false
 		}
 	} else {
+		node.validate(t)
 		removeOrphan(t, node)
+		node.validate(t)
+
 		node = node._copy()
+		node.validate(t)
+
 		if bytes.Compare(key, node.key) < 0 {
 			node.leftNode, updated = node.getLeftNode(t).set(t, key, value)
 			node.leftHash = nil // leftHash is yet unknown
@@ -291,10 +417,14 @@ func (node *IAVLNode) set(t *IAVLTree, key []byte, value []byte) (newSelf *IAVLN
 			node.rightHash = nil // rightHash is yet unknown
 		}
 		if updated {
+			node.validate(t)
 			return node, updated
 		} else {
 			node.calcHeightAndSize(t)
-			return node.balance(t), updated
+			root := node.balance(t)
+			root.validate(t)
+
+			return root, updated
 		}
 	}
 }
@@ -309,6 +439,7 @@ func (node *IAVLNode) remove(t *IAVLTree, key []byte) (
 			removeOrphan(t, node)
 			return nil, nil, nil, node.value, true
 		} else {
+			//fmt.Printf("##### Removing Node that doesn't exist???\n")
 			return node.hash, node, nil, nil, false
 		}
 	} else {
@@ -319,6 +450,7 @@ func (node *IAVLNode) remove(t *IAVLTree, key []byte) (
 			if !removed {
 				return node.hash, node, nil, value, false
 			} else if newLeftHash == nil && newLeftNode == nil { // left node held value, was removed
+				removeOrphan(t, node)
 				return node.rightHash, node.rightNode, node.key, value, true
 			}
 			removeOrphan(t, node)
@@ -334,6 +466,7 @@ func (node *IAVLNode) remove(t *IAVLTree, key []byte) (
 			if !removed {
 				return node.hash, node, nil, value, false
 			} else if newRightHash == nil && newRightNode == nil { // right node held value, was removed
+				removeOrphan(t, node)
 				return node.leftHash, node.leftNode, nil, value, true
 			}
 			removeOrphan(t, node)
@@ -368,6 +501,7 @@ func (node *IAVLNode) getRightNode(t *IAVLTree) *IAVLNode {
 // NOTE: overwrites node
 // TODO: optimize balance & rotate
 func (node *IAVLNode) rotateRight(t *IAVLTree) *IAVLNode {
+	removeOrphan(t, node)
 	node = node._copy()
 	l := node.getLeftNode(t)
 	removeOrphan(t, l)
@@ -386,6 +520,7 @@ func (node *IAVLNode) rotateRight(t *IAVLTree) *IAVLNode {
 // NOTE: overwrites node
 // TODO: optimize balance & rotate
 func (node *IAVLNode) rotateLeft(t *IAVLTree) *IAVLNode {
+	removeOrphan(t, node)
 	node = node._copy()
 	r := node.getRightNode(t)
 	removeOrphan(t, r)
@@ -426,7 +561,7 @@ func (node *IAVLNode) balance(t *IAVLTree) (newSelf *IAVLNode) {
 			// Left Right Case
 			// node = node._copy()
 			left := node.getLeftNode(t)
-			removeOrphan(t, left)
+			//removeOrphan(t, left)
 			node.leftHash, node.leftNode = nil, left.rotateLeft(t)
 			//node.calcHeightAndSize()
 			return node.rotateRight(t)
@@ -440,7 +575,7 @@ func (node *IAVLNode) balance(t *IAVLTree) (newSelf *IAVLNode) {
 			// Right Left Case
 			// node = node._copy()
 			right := node.getRightNode(t)
-			removeOrphan(t, right)
+			//removeOrphan(t, right)
 			node.rightHash, node.rightNode = nil, right.rotateRight(t)
 			//node.calcHeightAndSize()
 			return node.rotateLeft(t)
@@ -497,7 +632,7 @@ func (node *IAVLNode) traverseInRange(t *IAVLTree, start, end []byte, ascending 
 	return stop
 }
 
-// Only used in testing...
+// left-most-data Only used in testing...
 func (node *IAVLNode) lmd(t *IAVLTree) *IAVLNode {
 	if node.height == 0 {
 		return node
@@ -505,7 +640,7 @@ func (node *IAVLNode) lmd(t *IAVLTree) *IAVLNode {
 	return node.getLeftNode(t).lmd(t)
 }
 
-// Only used in testing...
+// right-most-data Only used in testing...
 func (node *IAVLNode) rmd(t *IAVLTree) *IAVLNode {
 	if node.height == 0 {
 		return node
@@ -516,11 +651,16 @@ func (node *IAVLNode) rmd(t *IAVLTree) *IAVLNode {
 //----------------------------------------
 
 func removeOrphan(t *IAVLTree, node *IAVLNode) {
+	// intermediate node, it will be garbage collected
 	if !node.persisted {
+		//fmt.Printf("Orphaned an Internal node %X\n", node.hash)
 		return
 	}
+	// an in memory tree
 	if t.ndb == nil {
+		//fmt.Printf("Orphaned an In-memory node %X\n", node.hash)
 		return
 	}
+	//fmt.Printf("Orphaned a Persisted node %X\n", node.hash)
 	t.ndb.RemoveNode(t, node)
 }

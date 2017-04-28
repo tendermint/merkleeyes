@@ -5,7 +5,7 @@ import (
 	"path"
 
 	abci "github.com/tendermint/abci/types"
-	"github.com/tendermint/go-wire"
+	wire "github.com/tendermint/go-wire"
 	"github.com/tendermint/merkleeyes/iavl"
 	cmn "github.com/tendermint/tmlibs/common"
 	dbm "github.com/tendermint/tmlibs/db"
