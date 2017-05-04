@@ -132,7 +132,7 @@ func (node *IAVLNode) has(t *IAVLTree, key []byte) (has bool) {
 	}
 }
 
-// validate that the Node struct is setup correct, as it traverses.
+// validate that the Node struct is setup correct, validate children as well.
 func (node *IAVLNode) validate(t *IAVLTree) {
 	if node == nil {
 		return
