@@ -15,18 +15,18 @@ import (
 var tmspAddr = "tcp://127.0.0.1:46659"
 
 func TestNonPersistent(t *testing.T) {
-	testProcedure(t, tmspAddr, "", 0, false, true)
+	testProcedure(t, tmspAddr, "", 0, false, true, false)
 }
 
 func TestPersistent(t *testing.T) {
 	dbName := "testDb"
 	os.RemoveAll(dbName) //remove the database if exists for any reason
-	testProcedure(t, tmspAddr, dbName, 0, false, false)
-	testProcedure(t, tmspAddr, dbName, 0, true, true)
+	testProcedure(t, tmspAddr, dbName, 0, false, false, true)
+	testProcedure(t, tmspAddr, dbName, 0, true, true, true)
 	os.RemoveAll(dbName) //cleanup, remove database that was created by testProcedure
 }
 
-func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence, clearRecords bool) {
+func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence, clearRecords, hasVersions bool) {
 
 	checkErr := func(err error) {
 		if err != nil {
@@ -55,6 +55,7 @@ func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence
 		commit(t, cli, "")
 		get(t, cli, "foo", "")
 		get(t, cli, "bar", "")
+
 		// Set foo=FOO
 		set(t, cli, "foo", "FOO")
 
@@ -74,14 +75,21 @@ func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence
 		set(t, cli, "foo2", "2")
 		set(t, cli, "foo3", "3")
 		set(t, cli, "foo1", "4")
+
 		// nothing commited yet...
 		get(t, cli, "foo1", "")
-		commit(t, cli, "548A1A7FE60D0D1414E65B385E9796D99E00B316")
+
 		// now we got info
+		if hasVersions {
+			commit(t, cli, "548A1A7FE60D0D1414E65B385E9796D99E00B316")
+		} else {
+			commit(t, cli, "19735C74EEA3D177E00F4FA8DC78D6EE67E1ABAC")
+		}
 		get(t, cli, "foo1", "4")
 		get(t, cli, "foo2", "2")
 		get(t, cli, "foo3", "3")
 	} else {
+		// see if they are still there
 		get(t, cli, "foo1", "4")
 		get(t, cli, "foo2", "2")
 		get(t, cli, "foo3", "3")

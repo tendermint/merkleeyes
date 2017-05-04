@@ -1,7 +1,9 @@
 package iavl
 
 import (
+	"container/list"
 	"fmt"
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
 // Prints the in-memory children recursively.
@@ -33,6 +35,34 @@ func printIAVLNode(node *IAVLNode, indent int) {
 		fmt.Printf("%s    %X\n", indentPrefix, node.leftHash)
 	}
 
+}
+
+// GetValue is a slow way to get the ith element's value
+func GetValue(l *list.List, index int) interface{} {
+	for e := l.Front(); e != nil; e = e.Next() {
+		index--
+		if index <= 0 {
+			return e.Value
+		}
+	}
+	return nil
+}
+
+// SetValue is a slow way to set the ith element's value
+func SetValue(l *list.List, index int, value interface{}) {
+	for e := l.Front(); e != nil; e = e.Next() {
+		if index <= 0 {
+			e.Value = value
+			return
+		}
+		index--
+	}
+
+	if index <= 0 {
+		l.PushBack(value)
+	} else {
+		cmn.PanicSanity(fmt.Sprintf("Index not contiguous %d", index))
+	}
 }
 
 func maxInt8(a, b int8) int8 {

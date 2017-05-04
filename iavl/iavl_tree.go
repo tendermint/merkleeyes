@@ -17,10 +17,10 @@ import (
 )
 
 // Keys for administrative persistent data
-var rootsKey = []byte("go-merkle.roots")      // Database key for the list of roots
-var versionKey = []byte("go-merkle.version")  // Database key for the version
-var orphansKey = []byte("go-merkle.orphans/") // Partial database key for each set of orphans
-var deletesKey = []byte("go-merkle.deletes")  // Database key for roots to be pruned
+var rootsKey = []byte("merkleeyes.roots")      // Database key for the list of roots
+var versionKey = []byte("merkleeyes.version")  // Database key for the version
+var orphansKey = []byte("merkleeyes.orphans/") // Partial database key for each set of orphans
+var deletesKey = []byte("merkleeyes.deletes")  // Database key for roots to be pruned
 
 // Fixed number of versions
 const rootsMax = 3
@@ -59,34 +59,6 @@ func NewIAVLTree(cacheSize int, db db.DB) *IAVLTree {
 			roots:   list.New(),
 			id:      lastId,
 		}
-	}
-}
-
-// GetValue is a slow way to get the ith element's value
-func GetValue(l *list.List, index int) interface{} {
-	for e := l.Front(); e != nil; e = e.Next() {
-		index--
-		if index <= 0 {
-			return e.Value
-		}
-	}
-	return nil
-}
-
-// SetValue is a slow way to set the ith element's value
-func SetValue(l *list.List, index int, value interface{}) {
-	for e := l.Front(); e != nil; e = e.Next() {
-		if index <= 0 {
-			e.Value = value
-			return
-		}
-		index--
-	}
-
-	if index <= 0 {
-		l.PushBack(value)
-	} else {
-		cmn.PanicSanity(fmt.Sprintf("Index not contiguous %d", index))
 	}
 }
 
@@ -263,7 +235,7 @@ func (t *IAVLTree) Set(key []byte, value []byte) (updated bool) {
 // Hash returns the root hash for the tree
 // Should not be exposed, since it is just a step in saving
 func (t *IAVLTree) Hash() []byte {
-	//fmt.Printf("Hash ")
+	//fmt.Printf("Hash %d\n", t.version)
 	root := t.GetRoot(t.version)
 	if root == nil {
 		return nil
@@ -275,7 +247,8 @@ func (t *IAVLTree) Hash() []byte {
 // HashWithCount returns the root hash for the tree and the size of the tree
 // Should not be exposed, since it is just a step in saving
 func (t *IAVLTree) HashWithCount() ([]byte, int) {
-	//fmt.Printf("HashWithCount ")
+	//fmt.Printf("HashWithCount %d\n", t.version)
+
 	root := t.GetRoot(t.version)
 	if root == nil {
 		return nil, 0
@@ -306,6 +279,7 @@ func (t *IAVLTree) Save() []byte {
 		return nil
 
 	} else if t.ndb != nil {
+		//fmt.Printf("Rebuilding Hashes %d\n", t.version)
 		firstNode.save(t)
 	}
 
@@ -314,7 +288,7 @@ func (t *IAVLTree) Save() []byte {
 
 	if t.ndb != nil {
 		// TODO: should be a loop, if the rootsMax can change
-		if rootsMax > 1 && t.roots.Len()+1 > rootsMax {
+		if rootsMax > 1 && t.roots.Len() >= rootsMax {
 			//fmt.Printf("##### Cleanup!!! ######\n")
 
 			// TODO: should be locking any changes to deletes?
@@ -370,7 +344,7 @@ func (t *IAVLTree) Load(hash []byte) {
 	}
 }
 
-// GetVersion finds the value for the current version
+// Get finds the value for the current version
 func (t *IAVLTree) Get(key []byte) (index int, value []byte, exists bool) {
 	//fmt.Printf("Get ")
 	root := t.GetRoot(t.version)
@@ -591,9 +565,6 @@ func (ndb *nodeDB) GetOrphans(hash []byte) [][]byte {
 	key := orphansKey
 	key = append(key, hash...)
 
-	orphans := make([][]byte, 0)
-	//orphans = append(orphans, key) // Must include the original storage key
-
 	buf := ndb.db.Get(key)
 	if len(buf) == 0 {
 		//fmt.Printf("No orphans for key %X\n", key)
@@ -603,6 +574,9 @@ func (ndb *nodeDB) GetOrphans(hash []byte) [][]byte {
 	count := int(wire.GetInt32(buf))
 	buf = buf[4:]
 
+	orphans := make([][]byte, count)
+	//orphans = append(orphans, key) // Must include the original storage key
+
 	for i := 0; i < count; i++ {
 		bytes, n, err := wire.GetByteSlice(buf)
 		if err != nil {
@@ -611,7 +585,7 @@ func (ndb *nodeDB) GetOrphans(hash []byte) [][]byte {
 		buf = buf[n:]
 		//fmt.Printf("Have Node: %X\n", bytes)
 
-		orphans = append(orphans, bytes)
+		orphans[i] = bytes
 	}
 	return orphans
 }
@@ -714,19 +688,19 @@ func (ndb *nodeDB) Prune() {
 	batch := ndb.db.NewBatch()
 
 	// Clear out the delete slice from the database
-	for i := 0; i < len(ndb.deletes); i++ {
+	for _, root := range ndb.deletes {
 
-		nodes := ndb.GetOrphans(ndb.deletes[i])
+		nodes := ndb.GetOrphans(root)
 		if nodes != nil {
-			for j := 0; j < len(nodes); j++ {
+			for i := 0; i < len(nodes); i++ {
 				//fmt.Printf("Delete Node %X\n", nodes[j])
-				batch.Delete(nodes[j])
+				batch.Delete(nodes[i])
 			}
 		}
 
 		// Delete the list itself
 		key := orphansKey
-		key = append(key, ndb.deletes[i]...)
+		key = append(key, root...)
 		//fmt.Printf("Delete Key %X\n", key)
 		batch.Delete(key)
 	}
