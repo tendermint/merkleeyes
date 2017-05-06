@@ -96,68 +96,7 @@ type action struct {
 	comment string
 }
 
-func TestTable(t *testing.T) {
-
-	pairs := []pair{
-		pair{"aaaaa", "aaaaa - value"},
-		pair{"bbbbb", "bbbbb - value"},
-		pair{"ccccc", "ccccc - value"},
-		pair{"ddddd", "ddddd - value"},
-		pair{"00001", "one - value"},
-		pair{"00002", "two - value"},
-		pair{"00003", "three - value"},
-		pair{"00004", "four - value"},
-	}
-
-	actions := []action{
-		// Add four values
-		action{SETVALUE, &pairs[0], false, "Should be a create"},
-		action{SETVALUE, &pairs[1], false, "Should be a create"},
-		action{SETVALUE, &pairs[2], false, "Should be a create"},
-		action{SETVALUE, &pairs[3], false, "Should be a create"},
-		action{SAVETREE, nil, true, "Should return a value"},
-
-		// Modify two
-		action{SETVALUE, &pairs[2], true, "Should be an update"},
-		action{SETVALUE, &pairs[3], true, "Should be an update"},
-		action{SAVETREE, nil, true, "Should return a value"},
-
-		// Mess around
-		action{REMOVEVALUE, &pairs[2], true, "Should delete"},
-		action{SETVALUE, &pairs[2], false, "Should be an create"},
-		action{SETVALUE, &pairs[3], true, "Should be an update"},
-		action{SAVETREE, nil, true, "Should return a value"},
-
-		action{SETVALUE, &pairs[4], false, "Should be a create"},
-		action{SETVALUE, &pairs[5], false, "Should be a create"},
-		action{SETVALUE, &pairs[6], false, "Should be a create"},
-		action{SETVALUE, &pairs[7], false, "Should be a create"},
-		action{SAVETREE, nil, true, "Should return a value"},
-
-		action{REMOVEVALUE, &pairs[0], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[1], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[2], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[3], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[4], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[5], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[6], true, "Should delete"},
-		action{REMOVEVALUE, &pairs[7], true, "Should delete"},
-		action{SAVETREE, nil, false, "Should not return a value"},
-	}
-
-	db := db.NewDB("testing", "goleveldb", "./")
-	var tree *IAVLTree = NewIAVLTree(0, db)
-
-	// make sure there is nothing in this database if it already exists
-	tree.ndb.DeleteAll()
-
-	for i := 0; i < 10; i++ {
-		processActions(t, tree, actions)
-	}
-
-	//tree.ndb.BatchDeleteAll()
-}
-
+// processActions and check their results
 func processActions(t *testing.T, tree *IAVLTree, actions []action) {
 	verbose := false
 
@@ -173,7 +112,7 @@ func processActions(t *testing.T, tree *IAVLTree, actions []action) {
 
 		case REMOVEVALUE:
 			if verbose {
-				fmt.Printf("Doing a Delete\n")
+				fmt.Printf("Doing a Remove\n")
 			}
 			_, status = tree.Remove([]byte(actions[i].pair.key))
 
@@ -189,6 +128,198 @@ func processActions(t *testing.T, tree *IAVLTree, actions []action) {
 			text := fmt.Sprintf("%d) %s status=%v", i, actions[i].comment, status)
 			t.Error(text)
 		}
+	}
+}
+
+func TestTable(t *testing.T) {
+
+	pairs := []pair{
+		pair{"aaaaa", "value of a"},
+		pair{"bbbbb", "value of b"},
+		pair{"ccccc", "value of c"},
+		pair{"ddddd", "value of d"},
+		pair{"00001", "value of one"},
+		pair{"00002", "value of two"},
+		pair{"00003", "value of three"},
+		pair{"00004", "value of four"},
+	}
+
+	actions := []action{
+		// Add four values
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SETVALUE, &pairs[1], false, "Should be a create"},
+		action{SETVALUE, &pairs[2], false, "Should be a create"},
+		action{SETVALUE, &pairs[3], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		// Modify two
+		action{SETVALUE, &pairs[2], true, "Should be an update"},
+		action{SETVALUE, &pairs[3], true, "Should be an update"},
+		action{SETVALUE, &pairs[4], false, "Should be an create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		// Mess around
+		action{REMOVEVALUE, &pairs[2], true, "Should remove"},
+		action{SETVALUE, &pairs[2], false, "Should be an create"},
+		action{SETVALUE, &pairs[3], true, "Should be an update"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{SETVALUE, &pairs[4], true, "Should be a update"},
+		action{SETVALUE, &pairs[5], false, "Should be a create"},
+		action{SETVALUE, &pairs[6], false, "Should be a create"},
+		action{SETVALUE, &pairs[7], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[1], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[2], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[3], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[4], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[5], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[6], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[7], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	db := db.NewDB("TestTable", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.DeleteAll()
+
+	for i := 0; i < 10; i++ {
+		processActions(t, tree, actions)
+	}
+}
+
+func TestGrowth(t *testing.T) {
+
+	pairs := []pair{
+		pair{"aaaaa", "value of a"},
+		pair{"bbbbb", "value of b"},
+		pair{"ccccc", "value of c"},
+		pair{"ddddd", "value of d"},
+		pair{"00001", "value of one"},
+		pair{"00002", "value of two"},
+		pair{"00003", "value of three"},
+		pair{"00004", "value of four"},
+	}
+
+	initial_actions := []action{
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SETVALUE, &pairs[1], false, "Should be a create"},
+		action{SETVALUE, &pairs[2], false, "Should be a create"},
+		action{SETVALUE, &pairs[3], false, "Should be a create"},
+		action{SETVALUE, &pairs[4], false, "Should be a create"},
+		action{SETVALUE, &pairs[5], false, "Should be a create"},
+		action{SETVALUE, &pairs[6], false, "Should be a create"},
+		action{SETVALUE, &pairs[7], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+	}
+
+	actions := []action{
+		action{SETVALUE, &pairs[0], true, "Should be a update"},
+		action{SETVALUE, &pairs[1], true, "Should be a update"},
+		action{SETVALUE, &pairs[2], true, "Should be a update"},
+		action{SETVALUE, &pairs[3], true, "Should be a update"},
+		action{SETVALUE, &pairs[4], true, "Should be a update"},
+		action{SETVALUE, &pairs[5], true, "Should be a update"},
+		action{SETVALUE, &pairs[6], true, "Should be a update"},
+		action{SETVALUE, &pairs[7], true, "Should be a update"},
+		action{SAVETREE, nil, true, "Should return a value"},
+	}
+
+	final_actions := []action{
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[1], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[2], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[3], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[4], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[5], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[6], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[7], true, "Should remove"},
+
+		// Clear it enough to force all orphans to be deleted
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	clear := []action{
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	db := db.NewDB("TestGrowth", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.DeleteAll()
+
+	processActions(t, tree, initial_actions)
+
+	for i := 0; i < 100; i++ {
+		processActions(t, tree, actions)
+	}
+
+	processActions(t, tree, final_actions)
+
+	for i := 0; i < 1000; i++ {
+		processActions(t, tree, clear)
+	}
+}
+
+func TestEmptyTable(t *testing.T) {
+
+	pairs := []pair{
+		pair{"aaaaa", "aaaaa - value"},
+		pair{"bbbbb", "bbbbb - value"},
+		pair{"ccccc", "ccccc - value"},
+		pair{"ddddd", "ddddd - value"},
+	}
+
+	actions := []action{
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		// Add four values
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	db := db.NewDB("TestEmptyTable", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.DeleteAll()
+
+	for i := 0; i < 1; i++ {
+		processActions(t, tree, actions)
 	}
 }
 

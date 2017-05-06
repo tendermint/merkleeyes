@@ -37,13 +37,36 @@ func printIAVLNode(node *IAVLNode, indent int) {
 
 }
 
+func compareBytes(left, right []byte) bool {
+
+	if left == nil && right == nil {
+		return true
+	}
+
+	if left == nil || right == nil {
+		return false
+	}
+
+	if len(left) != len(right) {
+		return false
+	}
+
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+
+	return true
+}
+
 // GetValue is a slow way to get the ith element's value
 func GetValue(l *list.List, index int) interface{} {
 	for e := l.Front(); e != nil; e = e.Next() {
-		index--
 		if index <= 0 {
 			return e.Value
 		}
+		index--
 	}
 	return nil
 }
