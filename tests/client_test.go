@@ -82,7 +82,7 @@ func testProcedure(t *testing.T, addr, dbName string, cache int, testPersistence
 
 		// now we got info
 		if hasVersions {
-			commit(t, cli, "548A1A7FE60D0D1414E65B385E9796D99E00B316")
+			commit(t, cli, "E1C5546D35909C4FC3641605CEC5C1670D68AA59")
 		} else {
 			commit(t, cli, "19735C74EEA3D177E00F4FA8DC78D6EE67E1ABAC")
 		}
