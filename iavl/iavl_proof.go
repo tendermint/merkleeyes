@@ -20,14 +20,11 @@ type IAVLProof struct {
 
 func (proof *IAVLProof) Verify(key []byte, value []byte, root []byte, version int) bool {
 	if !bytes.Equal(proof.RootHash, root) {
-		//fmt.Printf("Verify Failed: Roots don't match\n")
 		return false
 	}
 	leafNode := IAVLProofLeafNode{KeyBytes: key, ValueBytes: value, Version: version}
 	leafHash := leafNode.Hash()
 	if !bytes.Equal(leafHash, proof.LeafHash) {
-		//fmt.Printf("Verify Failed: Leafs don't match '%X' vs '%X'\n", value, leafNode.ValueBytes)
-		//fmt.Printf("'%X'\n'%X'\n", leafHash, proof.LeafHash)
 		return false
 	}
 	hash := leafHash
@@ -37,7 +34,6 @@ func (proof *IAVLProof) Verify(key []byte, value []byte, root []byte, version in
 	if bytes.Equal(proof.RootHash, hash) {
 		return true
 	} else {
-		//fmt.Printf("Verify Failed: Aunts don't add up\n")
 		return false
 	}
 }
@@ -80,7 +76,6 @@ func (branch IAVLProofInnerNode) Hash(childHash []byte) []byte {
 	if err != nil {
 		cmn.PanicCrisis(cmn.Fmt("Failed to hash IAVLProofInnerNode: %v", err))
 	}
-	// fmt.Printf("InnerNode hash bytes: %X\n", buf.Bytes())
 	hasher.Write(buf.Bytes())
 	return hasher.Sum(nil)
 }
@@ -103,7 +98,6 @@ func (leaf IAVLProofLeafNode) Hash() []byte {
 	if err != nil {
 		cmn.PanicCrisis(cmn.Fmt("Failed to hash IAVLProofLeafNode: %v", err))
 	}
-	// fmt.Printf("LeafNode hash bytes:   %X\n", buf.Bytes())
 	hasher.Write(buf.Bytes())
 	return hasher.Sum(nil)
 }
@@ -153,7 +147,6 @@ func (node *IAVLNode) constructProof(t *IAVLTree, key []byte, valuePtr *[]byte, 
 func (t *IAVLTree) ConstructProof(key []byte, version int) (value []byte, leafVersion int, proof *IAVLProof) {
 	root := t.GetRoot(version)
 	if root == nil {
-		//fmt.Printf("Missing Root in Proof\n")
 		return nil, 0, nil
 	}
 	root.hashWithCount(t) // Ensure that all hashes are calculated.
@@ -162,7 +155,6 @@ func (t *IAVLTree) ConstructProof(key []byte, version int) (value []byte, leafVe
 	}
 	exists := root.constructProof(t, key, &value, &leafVersion, proof)
 	if exists {
-		//fmt.Printf("ConstructProof on version=%d leafv=%d\n", version, leafVersion)
 		return value, leafVersion, proof
 	} else {
 		return nil, 0, nil
