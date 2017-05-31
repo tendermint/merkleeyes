@@ -94,6 +94,7 @@ func (t *IAVLTree) PrintRoots() {
 	}
 }
 
+// Copy the tree
 // The returned tree and the original tree are goroutine independent.
 // That is, they can each run in their own goroutine.
 // However, upon Save(), any other trees that share a db will become
@@ -699,7 +700,7 @@ func (ndb *nodeDB) SaveDeletes(batch db.Batch) {
 	batch.Set(deletesKey, buf.Bytes())
 }
 
-// Remove node from cache and mark it as an orphan
+// RemoveNode from cache and mark it as an orphan
 func (ndb *nodeDB) RemoveNode(t *IAVLTree, node *IAVLNode) {
 	ndb.mtx.Lock()
 	defer ndb.mtx.Unlock()
@@ -745,9 +746,12 @@ func (ndb *nodeDB) PruneOrphans() {
 	ndb.orphans = make([][]byte, 0)
 }
 
-// Prune removes old orphans from the database
+// Prune removes a fixed number of old orphan from the database
 func (ndb *nodeDB) Prune() {
 	batch := ndb.db.NewBatch()
+
+	// TODO: should be configurable
+	maxDeletes := 5
 
 	// Clear out the delete slice from the database
 	for _, version := range ndb.deletes {
@@ -761,6 +765,13 @@ func (ndb *nodeDB) Prune() {
 		// Delete the list itself
 		key := OrphanKey(version)
 		batch.Delete(key)
+
+		// Keep the number of deletes per Prune bounded
+		maxDeletes--
+		if maxDeletes < 1 {
+			break
+		}
+
 	}
 
 	// Empty the deletes and update the database
