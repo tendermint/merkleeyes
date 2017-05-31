@@ -5,9 +5,11 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"sort"
+	"sync"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ripemd160"
 
 	wire "github.com/tendermint/go-wire"
 	cmn "github.com/tendermint/tmlibs/common"
@@ -18,77 +20,15 @@ import (
 	"testing"
 )
 
-const testReadLimit = 1 << 20 // Some reasonable limit for wire.Read*() lmt
-
-func randstr(length int) string {
-	return cmn.RandStr(length)
-}
-
-func i2b(i int) []byte {
-	bz := make([]byte, 4)
-	wire.PutInt32(bz, int32(i))
-	return bz
-}
-
-func b2i(bz []byte) int {
-	i := wire.GetInt32(bz)
-	return int(i)
-}
-
-// Convenience for a new node
-func N(l, r interface{}) *IAVLNode {
-	var left, right *IAVLNode
-	if _, ok := l.(*IAVLNode); ok {
-		left = l.(*IAVLNode)
-	} else {
-		left = NewIAVLNode(i2b(l.(int)), nil, 0)
-	}
-	if _, ok := r.(*IAVLNode); ok {
-		right = r.(*IAVLNode)
-	} else {
-		right = NewIAVLNode(i2b(r.(int)), nil, 0)
-	}
-
-	n := &IAVLNode{
-		key:       right.lmd(nil).key,
-		value:     nil,
-		leftNode:  left,
-		rightNode: right,
-	}
-	n.calcHeightAndSize(nil)
-	return n
-}
-
-// Setup a deep node
-func T(n *IAVLNode) *IAVLTree {
-	d := db.NewDB("test", db.MemDBBackendStr, "")
-	t := NewIAVLTree(0, d)
-
-	n.hashWithCount(t)
-	SetValue(t.roots, 0, n)
-	return t
-}
-
-// Convenience for simple printing of keys & tree structure
-func P(n *IAVLNode) string {
-	if n.height == 0 {
-		return fmt.Sprintf("%v", b2i(n.key))
-	} else {
-		return fmt.Sprintf("(%v %v)", P(n.leftNode), P(n.rightNode))
-	}
-}
-
+// List out the major operations
 const (
-	SETVALUE    = 0
-	REMOVEVALUE = 1
-	SAVETREE    = 2
+	SETVALUE = iota
+	REMOVEVALUE
+	SAVETREE
+	COPYTREE
 )
 
-type pair struct {
-	key   string
-	value string
-}
-
+// A given action in the tests
 type action struct {
 	cmd     int
 	pair    *pair
@@ -96,53 +36,145 @@ type action struct {
 	comment string
 }
 
+// Convenience struct for keeping the data together
+type pair struct {
+	key   string
+	value string
+}
+
+var verbose bool = false
+
 // processActions and check their results
-func processActions(t *testing.T, tree *IAVLTree, actions []action) {
-	verbose := false
+func processActions(t *testing.T, tree *IAVLTree, actions []action) *IAVLTree {
 
 	for i := range actions {
-		var status bool
-
-		switch actions[i].cmd {
-		case SETVALUE:
-			if verbose {
-				fmt.Printf("Doing a Set\n")
-			}
-			status = tree.Set([]byte(actions[i].pair.key), []byte(actions[i].pair.value))
-
-		case REMOVEVALUE:
-			if verbose {
-				fmt.Printf("Doing a Remove\n")
-			}
-			_, status = tree.Remove([]byte(actions[i].pair.key))
-
-		case SAVETREE:
-			if verbose {
-				fmt.Printf("Doing a Save\n")
-			}
-			bytes := tree.Save()
-			status = bytes != nil
-		}
-
-		if status != actions[i].status {
-			text := fmt.Sprintf("%d) %s status=%v", i, actions[i].comment, status)
-			t.Error(text)
-		}
+		tree = processAction(t, tree, i, &actions[i])
 	}
+	return tree
+}
+
+func processAction(t *testing.T, tree *IAVLTree, index int, next *action) *IAVLTree {
+
+	var status bool
+
+	switch next.cmd {
+	case SETVALUE:
+		if verbose {
+			fmt.Printf("Doing a Set\n")
+		}
+		status = tree.Set([]byte(next.pair.key), []byte(next.pair.value))
+
+	case REMOVEVALUE:
+		if verbose {
+			fmt.Printf("Doing a Remove\n")
+		}
+		_, status = tree.Remove([]byte(next.pair.key))
+
+	case SAVETREE:
+		if verbose {
+			fmt.Printf("Doing a Save\n")
+		}
+		bytes := tree.Save()
+		status = bytes != nil
+
+	case COPYTREE:
+		if verbose {
+			fmt.Printf("Doing a Copy\n")
+		}
+		tree = tree.Copy().(*IAVLTree)
+		status = true
+	}
+
+	if status != next.status {
+		text := fmt.Sprintf("%d) %s status=%v", index, next.comment, status)
+		t.Error(text)
+	}
+
+	return tree
+}
+
+func NextKey(series string, index int, lastHash []byte) []byte {
+	var buffer []byte
+
+	buffer = append(buffer, series...)
+	buffer = append(buffer, string(index)...)
+
+	if lastHash != nil {
+		buffer = append(buffer, lastHash...)
+	}
+
+	hasher := ripemd160.New()
+	hasher.Write(buffer)
+	hash := hasher.Sum(nil)
+
+	return hash
+}
+
+var pairs []pair = []pair{
+	pair{"aaaaa", "value of a"},
+	pair{"bbbbb", "value of b"},
+	pair{"ccccc", "value of c"},
+	pair{"ddddd", "value of d"},
+	pair{"00001", "value of one"},
+	pair{"00002", "value of two"},
+	pair{"00003", "value of three"},
+	pair{"00004", "value of four"},
+}
+
+func TestCopy(t *testing.T) {
+	copy := []action{
+		action{COPYTREE, nil, true, "Should do a copy"},
+	}
+
+	db := db.NewDB("TestCopy", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.BatchDeleteAll()
+
+	// Make a copy of the tree
+	other_tree := processActions(t, tree, copy)
+
+	var group sync.WaitGroup
+	group.Add(2)
+
+	// Essentially the main copy of the tree, lets add lots of stuff
+	go func() {
+		defer group.Done()
+		var hash []byte
+		for i := 0; i < 10000; i++ {
+			hash = NextKey("A", i, hash)
+			a := &action{SETVALUE, &pair{string(hash), "value of " + string(hash)}, false, "Create"}
+			tree = processAction(t, tree, i, a)
+		}
+	}()
+
+	// A second copy in memory, repeat the first work, but also add in a second set
+	go func() {
+		defer group.Done()
+		var hash1 []byte
+		var hash2 []byte
+		for i := 0; i < 10000; i++ {
+
+			hash1 = NextKey("B", i, hash1)
+			a1 := &action{SETVALUE, &pair{string(hash1), "value of " + string(hash1)}, false, "Create"}
+			other_tree = processAction(t, other_tree, i, a1)
+
+			hash2 = NextKey("A", i, hash2)
+			a2 := &action{SETVALUE, &pair{string(hash2), "value of " + string(hash2)}, false, "Create"}
+			other_tree = processAction(t, other_tree, i, a2)
+		}
+	}()
+
+	// Wait until both have completed
+	group.Wait()
+
+	// Commit the mess
+	a := &action{SAVETREE, nil, true, "Save"}
+	tree = processAction(t, tree, 0, a)
 }
 
 func TestTable(t *testing.T) {
-
-	pairs := []pair{
-		pair{"aaaaa", "value of a"},
-		pair{"bbbbb", "value of b"},
-		pair{"ccccc", "value of c"},
-		pair{"ddddd", "value of d"},
-		pair{"00001", "value of one"},
-		pair{"00002", "value of two"},
-		pair{"00003", "value of three"},
-		pair{"00004", "value of four"},
-	}
 
 	actions := []action{
 		// Add four values
@@ -201,17 +233,6 @@ func TestTable(t *testing.T) {
 
 func TestGrowth(t *testing.T) {
 
-	pairs := []pair{
-		pair{"aaaaa", "value of a"},
-		pair{"bbbbb", "value of b"},
-		pair{"ccccc", "value of c"},
-		pair{"ddddd", "value of d"},
-		pair{"00001", "value of one"},
-		pair{"00002", "value of two"},
-		pair{"00003", "value of three"},
-		pair{"00004", "value of four"},
-	}
-
 	initial_actions := []action{
 		action{SETVALUE, &pairs[0], false, "Should be a create"},
 		action{SETVALUE, &pairs[1], false, "Should be a create"},
@@ -262,7 +283,7 @@ func TestGrowth(t *testing.T) {
 
 	processActions(t, tree, initial_actions)
 
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 1000; i++ {
 		processActions(t, tree, actions)
 	}
 
@@ -274,13 +295,6 @@ func TestGrowth(t *testing.T) {
 }
 
 func TestEmptyTable(t *testing.T) {
-
-	pairs := []pair{
-		pair{"aaaaa", "aaaaa - value"},
-		pair{"bbbbb", "bbbbb - value"},
-		pair{"ccccc", "ccccc - value"},
-		pair{"ddddd", "ddddd - value"},
-	}
 
 	actions := []action{
 		action{SAVETREE, nil, false, "Should not return a value"},
@@ -320,6 +334,66 @@ func TestEmptyTable(t *testing.T) {
 
 	for i := 0; i < 1; i++ {
 		processActions(t, tree, actions)
+	}
+}
+
+const testReadLimit = 1 << 20 // Some reasonable limit for wire.Read*() lmt
+
+func randstr(length int) string {
+	return cmn.RandStr(length)
+}
+
+func i2b(i int) []byte {
+	bz := make([]byte, 4)
+	wire.PutInt32(bz, int32(i))
+	return bz
+}
+
+func b2i(bz []byte) int {
+	i := wire.GetInt32(bz)
+	return int(i)
+}
+
+// Convenience for a new node
+func N(l, r interface{}) *IAVLNode {
+	var left, right *IAVLNode
+	if _, ok := l.(*IAVLNode); ok {
+		left = l.(*IAVLNode)
+	} else {
+		left = NewIAVLNode(i2b(l.(int)), nil, 0)
+	}
+	if _, ok := r.(*IAVLNode); ok {
+		right = r.(*IAVLNode)
+	} else {
+		right = NewIAVLNode(i2b(r.(int)), nil, 0)
+	}
+
+	n := &IAVLNode{
+		key:       right.lmd(nil).key,
+		value:     nil,
+		leftNode:  left,
+		rightNode: right,
+	}
+	n.calcHeightAndSize(nil)
+	return n
+}
+
+// Setup a deep node
+func T(n *IAVLNode) *IAVLTree {
+	d := db.NewDB("test", db.MemDBBackendStr, "")
+	t := NewIAVLTree(0, d)
+
+	n.hashWithCount(t)
+	SetValue(t.roots, 0, n)
+	return t
+}
+
+// Convenience for simple printing of keys & tree structure
+func P(n *IAVLNode) string {
+	if n.height == 0 {
+		return fmt.Sprintf("%v", b2i(n.key))
+	} else {
+		return fmt.Sprintf("(%v %v)", P(n.leftNode), P(n.rightNode))
 	}
 }
 
