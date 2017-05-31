@@ -121,6 +121,7 @@ var pairs []pair = []pair{
 	pair{"00004", "value of four"},
 }
 
+// Roughly ma
 func TestCopy(t *testing.T) {
 	copy := []action{
 		action{COPYTREE, nil, true, "Should do a copy"},
@@ -132,46 +133,52 @@ func TestCopy(t *testing.T) {
 	// make sure there is nothing in this database if it already exists
 	tree.ndb.BatchDeleteAll()
 
-	// Make a copy of the tree
-	other_tree := processActions(t, tree, copy)
+	for i := 0; i < 10; i++ {
+		// Make a copy of the tree
+		other_tree := processActions(t, tree, copy)
 
-	var group sync.WaitGroup
-	group.Add(2)
+		size := 3000
+		start := i * size
+		stop := (i + 1) * size
 
-	// Essentially the main copy of the tree, lets add lots of stuff
-	go func() {
-		defer group.Done()
-		var hash []byte
-		for i := 0; i < 10000; i++ {
-			hash = NextKey("A", i, hash)
-			a := &action{SETVALUE, &pair{string(hash), "value of " + string(hash)}, false, "Create"}
-			tree = processAction(t, tree, i, a)
-		}
-	}()
+		var group sync.WaitGroup
+		group.Add(2)
 
-	// A second copy in memory, repeat the first work, but also add in a second set
-	go func() {
-		defer group.Done()
-		var hash1 []byte
-		var hash2 []byte
-		for i := 0; i < 10000; i++ {
+		// Essentially the main copy of the tree, lets add lots of stuff
+		go func() {
+			defer group.Done()
+			var hash []byte
+			for step := start; step < stop; step++ {
+				hash = NextKey("A", step, hash)
+				act := &action{SETVALUE, &pair{string(hash), "value of " + string(hash)}, false, "Create"}
+				tree = processAction(t, tree, step, act)
+			}
+		}()
 
-			hash1 = NextKey("B", i, hash1)
-			a1 := &action{SETVALUE, &pair{string(hash1), "value of " + string(hash1)}, false, "Create"}
-			other_tree = processAction(t, other_tree, i, a1)
+		// A second copy in memory, repeat the first work, but also add in a second set
+		go func() {
+			defer group.Done()
+			var hash1 []byte
+			var hash2 []byte
+			for step := start; step < stop; step++ {
 
-			hash2 = NextKey("A", i, hash2)
-			a2 := &action{SETVALUE, &pair{string(hash2), "value of " + string(hash2)}, false, "Create"}
-			other_tree = processAction(t, other_tree, i, a2)
-		}
-	}()
+				hash1 = NextKey("B", step, hash1)
+				act1 := &action{SETVALUE, &pair{string(hash1), "value of " + string(hash1)}, false, "Create"}
+				other_tree = processAction(t, other_tree, step, act1)
 
-	// Wait until both have completed
-	group.Wait()
+				hash2 = NextKey("A", step, hash2)
+				act2 := &action{SETVALUE, &pair{string(hash2), "value of " + string(hash2)}, false, "Create"}
+				other_tree = processAction(t, other_tree, step, act2)
+			}
+		}()
 
-	// Commit the mess
-	a := &action{SAVETREE, nil, true, "Save"}
-	tree = processAction(t, tree, 0, a)
+		// Wait until both have completed
+		group.Wait()
+
+		// Commit the mess
+		a := &action{SAVETREE, nil, true, "Save"}
+		tree = processAction(t, tree, 0, a)
+	}
 }
 
 func TestTable(t *testing.T) {
