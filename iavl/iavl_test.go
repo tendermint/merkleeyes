@@ -42,6 +42,7 @@ type pair struct {
 	value string
 }
 
+// Set to true if you want output
 var verbose bool = false
 
 // processActions and check their results
@@ -60,26 +61,26 @@ func processAction(t *testing.T, tree *IAVLTree, index int, next *action) *IAVLT
 	switch next.cmd {
 	case SETVALUE:
 		if verbose {
-			fmt.Printf("Doing a Set\n")
+			fmt.Printf("Doing a Set for %x\n", next.pair.key)
 		}
 		status = tree.Set([]byte(next.pair.key), []byte(next.pair.value))
 
 	case REMOVEVALUE:
 		if verbose {
-			fmt.Printf("Doing a Remove\n")
+			fmt.Printf("Doing a Remove %x\n", next.pair.key)
 		}
 		_, status = tree.Remove([]byte(next.pair.key))
 
 	case SAVETREE:
 		if verbose {
-			fmt.Printf("Doing a Save\n")
+			fmt.Printf("Doing a Save for the Tree\n")
 		}
 		bytes := tree.Save()
 		status = bytes != nil
 
 	case COPYTREE:
 		if verbose {
-			fmt.Printf("Doing a Copy\n")
+			fmt.Printf("Doing a Copy of the Tree\n")
 		}
 		tree = tree.Copy().(*IAVLTree)
 		status = true
@@ -176,8 +177,25 @@ func TestCopy(t *testing.T) {
 		group.Wait()
 
 		// Commit the mess
-		a := &action{SAVETREE, nil, true, "Save"}
-		tree = processAction(t, tree, 0, a)
+		act := &action{SAVETREE, nil, true, "Save"}
+		tree = processAction(t, tree, 0, act)
+	}
+
+	// Okay, now lets see if we can delete everything
+	var hash []byte
+	for step := 0; step < 3000*10; step++ {
+		if step%3000 == 0 {
+			hash = nil
+		}
+		hash = NextKey("A", step, hash)
+		act := &action{REMOVEVALUE, &pair{string(hash), "value of " + string(hash)}, true, "Create"}
+		tree = processAction(t, tree, step, act)
+	}
+
+	// And Save it, a lot forcing pruning.
+	for i := 0; i < 1001; i++ {
+		act := &action{SAVETREE, nil, false, "Save"}
+		tree = processAction(t, tree, 0, act)
 	}
 }
 
