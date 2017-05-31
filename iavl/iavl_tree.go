@@ -1,5 +1,7 @@
 /*
-	Package merkle implements a key/value store with an immutable Merkle tree.
+	Package merkle implements a key/value store with an immutable Merkle tree to allow proofs.
+	It supports both in-memory and persistent data stores.
+	It supports save history and getting historic queries back to a fixed amount.
 */
 
 package iavl

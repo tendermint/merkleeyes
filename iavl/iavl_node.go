@@ -42,6 +42,7 @@ func NewIAVLNode(key []byte, value []byte, version int) *IAVLNode {
 	}
 }
 
+// MakeIAVLNode from a input buffer.
 // NOTE: The hash is not saved or set.  The caller should set the hash afterwards.
 // (Presumably the caller already has the hash)
 func MakeIAVLNode(buf []byte, t *IAVLTree) (node *IAVLNode, err error) {
@@ -96,6 +97,7 @@ func MakeIAVLNode(buf []byte, t *IAVLTree) (node *IAVLNode, err error) {
 	return node, nil
 }
 
+// _copy a node internally to maintain immutability
 func (node *IAVLNode) _copy() *IAVLNode {
 	if node.height == 0 {
 		cmn.PanicSanity("Why are you copying a value node?")
@@ -129,114 +131,6 @@ func (node *IAVLNode) has(t *IAVLTree, key []byte) (has bool) {
 			return node.getLeftNode(t).has(t, key)
 		} else {
 			return node.getRightNode(t).has(t, key)
-		}
-	}
-}
-
-func (node *IAVLNode) validate(t *IAVLTree) {
-	node.validate_internal(t)
-}
-
-// validate that the Node struct is setup correct, validate children as well. Used for debugging
-func (node *IAVLNode) validate_internal(t *IAVLTree) {
-	if node == nil {
-		return
-	}
-	if node.height == 0 {
-		if len(node.key) == 0 {
-			panic("Internal Key is empty")
-		}
-		if node.persisted && t.ndb == nil {
-			panic("Persisted node in memdb")
-		}
-		if node.persisted {
-			if node.hash == nil {
-				panic("Persisted but not hashed")
-			}
-		}
-	} else {
-		if len(node.value) != 0 {
-			panic("Value stored in an internal node")
-		}
-
-		if node.persisted && t.ndb == nil {
-			panic("Persisted node in memdb")
-		}
-
-		var right, left *IAVLNode
-		if node.persisted {
-
-			if node.leftHash == nil || node.rightHash == nil {
-				panic("Persistent children are missing")
-			}
-			if t.ndb == nil {
-				panic("Can not Persistent in memdb")
-			}
-
-			if node.leftNode == nil && node.leftHash != nil {
-				left = t.ndb.GetNode(t, node.leftHash)
-			} else {
-				left = node.leftNode
-			}
-
-			if node.rightNode == nil && node.rightHash != nil {
-				right = t.ndb.GetNode(t, node.rightHash)
-			} else {
-				right = node.rightNode
-			}
-
-		} else {
-			if node.leftNode == nil && node.leftHash == nil {
-				fmt.Printf("In-memory left is missing: %s\n", nodeMapping(node))
-				fmt.Printf("%p %p\n", node.leftNode, node.rightNode)
-				panic("In-memory left is missing")
-			}
-			if node.rightNode == nil && node.rightHash == nil {
-				fmt.Printf("In-memory right is missing: %s\n", nodeMapping(node))
-				fmt.Printf("%p %p\n", node.leftNode, node.rightNode)
-				panic("In-memory right is missing")
-			}
-			if node.leftNode == nil {
-				left = t.ndb.GetNode(t, node.leftHash)
-			} else {
-				left = node.leftNode
-			}
-			if node.rightNode == nil {
-				right = t.ndb.GetNode(t, node.rightHash)
-			} else {
-				right = node.rightNode
-			}
-		}
-
-		if left != nil {
-			left.validate_internal(t)
-		} else {
-			panic(fmt.Sprintf("Left is missing height=%d hash=%X", node.height, node.hash))
-		}
-		if right != nil {
-			right.validate_internal(t)
-		} else {
-			panic(fmt.Sprintf("Right is missing height=%d hash=%X", node.height, node.hash))
-		}
-
-		if left == nil || right == nil {
-			return
-		}
-
-		if node.size != left.size+right.size {
-			fmt.Printf("Node %s\n", nodeMapping(node))
-			fmt.Printf("Left %s\n", nodeMapping(left))
-			fmt.Printf("Right %s\n", nodeMapping(right))
-			panic("Size is wrong")
-		}
-		if node.height == left.height+1 || node.height == right.height+1 {
-			// Is ok
-		} else {
-			fmt.Printf("Node %s\n", nodeMapping(node))
-			fmt.Printf("Left %s\n", nodeMapping(left))
-			fmt.Printf("Right %s\n", nodeMapping(right))
-			fmt.Printf("%d = %d + 1 || %d + 1\n", node.height, left.height, right.height)
-			panic("Height is wrong")
 		}
 	}
 }
@@ -675,6 +569,114 @@ func (node *IAVLNode) rmd(t *IAVLTree) *IAVLNode {
 		return node
 	}
 	return node.getRightNode(t).rmd(t)
+}
+
+func (node *IAVLNode) validate(t *IAVLTree) {
+	node.validate_internal(t)
+}
+
+// validate that the Node struct is setup correct, validate children as well. Used for debugging
+func (node *IAVLNode) validate_internal(t *IAVLTree) {
+	if node == nil {
+		return
+	}
+	if node.height == 0 {
+		if len(node.key) == 0 {
+			panic("Internal Key is empty")
+		}
+		if node.persisted && t.ndb == nil {
+			panic("Persisted node in memdb")
+		}
+		if node.persisted {
+			if node.hash == nil {
+				panic("Persisted but not hashed")
+			}
+		}
+	} else {
+		if len(node.value) != 0 {
+			panic("Value stored in an internal node")
+		}
+
+		if node.persisted && t.ndb == nil {
+			panic("Persisted node in memdb")
+		}
+
+		var right, left *IAVLNode
+		if node.persisted {
+
+			if node.leftHash == nil || node.rightHash == nil {
+				panic("Persistent children are missing")
+			}
+			if t.ndb == nil {
+				panic("Can not Persistent in memdb")
+			}
+
+			if node.leftNode == nil && node.leftHash != nil {
+				left = t.ndb.GetNode(t, node.leftHash)
+			} else {
+				left = node.leftNode
+			}
+
+			if node.rightNode == nil && node.rightHash != nil {
+				right = t.ndb.GetNode(t, node.rightHash)
+			} else {
+				right = node.rightNode
+			}
+
+		} else {
+			if node.leftNode == nil && node.leftHash == nil {
+				fmt.Printf("In-memory left is missing: %s\n", nodeMapping(node))
+				fmt.Printf("%p %p\n", node.leftNode, node.rightNode)
+				panic("In-memory left is missing")
+			}
+			if node.rightNode == nil && node.rightHash == nil {
+				fmt.Printf("In-memory right is missing: %s\n", nodeMapping(node))
+				fmt.Printf("%p %p\n", node.leftNode, node.rightNode)
+				panic("In-memory right is missing")
+			}
+			if node.leftNode == nil {
+				left = t.ndb.GetNode(t, node.leftHash)
+			} else {
+				left = node.leftNode
+			}
+			if node.rightNode == nil {
+				right = t.ndb.GetNode(t, node.rightHash)
+			} else {
+				right = node.rightNode
+			}
+		}
+
+		if left != nil {
+			left.validate_internal(t)
+		} else {
+			panic(fmt.Sprintf("Left is missing height=%d hash=%X", node.height, node.hash))
+		}
+		if right != nil {
+			right.validate_internal(t)
+		} else {
+			panic(fmt.Sprintf("Right is missing height=%d hash=%X", node.height, node.hash))
+		}
+
+		if left == nil || right == nil {
+			return
+		}
+
+		if node.size != left.size+right.size {
+			fmt.Printf("Node %s\n", nodeMapping(node))
+			fmt.Printf("Left %s\n", nodeMapping(left))
+			fmt.Printf("Right %s\n", nodeMapping(right))
+			panic("Size is wrong")
+		}
+		if node.height == left.height+1 || node.height == right.height+1 {
+			// Is ok
+		} else {
+			fmt.Printf("Node %s\n", nodeMapping(node))
+			fmt.Printf("Left %s\n", nodeMapping(left))
+			fmt.Printf("Right %s\n", nodeMapping(right))
+			fmt.Printf("%d = %d + 1 || %d + 1\n", node.height, left.height, right.height)
+			panic("Height is wrong")
+		}
+	}
 }
 
 //----------------------------------------
