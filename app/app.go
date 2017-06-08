@@ -1,6 +1,7 @@
 package app
 
 import (
+	"bytes"
 	"fmt"
 	"path"
 
@@ -37,8 +38,12 @@ type MerkleEyesState struct {
 
 // Transaction type bytes
 const (
-	WriteSet byte = 0x01
-	WriteRem byte = 0x02
+	TxTypeSet           byte = 0x01
+	TxTypeRm            byte = 0x02
+	TxTypeGet           byte = 0x03
+	TxTypeCompareAndSet byte = 0x04
+
+	NonceLength = 12
 )
 
 // NewMerkleEyesApp initializes the database, loads any existing state, and returns a new MerkleEyesApp
@@ -126,13 +131,24 @@ func (app *MerkleEyesApp) CheckTx(tx []byte) abci.Result {
 }
 
 func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
-	if len(tx) == 0 {
-		return abci.ErrEncodingError.SetLog("Tx length cannot be zero")
+	// minimum length is 12 (nonce) + 1 (type byte) + 1 (len of len) + 1 (len) + 1 (arg) = 16
+	minTxLen := NonceLength + 4
+	if len(tx) < minTxLen {
+		return abci.ErrEncodingError.SetLog(fmt.Sprintf("Tx length must be at least %d", minTxLen))
 	}
+
+	nonce := tx[:12]
+	tx = tx[12:]
+
+	_, _, exists := tree.Get(append([]byte("/nonce/"), nonce...))
+	if exists {
+		return abci.ErrBadNonce.AppendLog(fmt.Sprintf("Nonce %X already exists", nonce))
+	}
+
 	typeByte := tx[0]
 	tx = tx[1:]
 	switch typeByte {
-	case WriteSet: // Set
+	case TxTypeSet: // Set
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
@@ -149,7 +165,7 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 
 		tree.Set(key, value)
 		// fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
-	case WriteRem: // Remove
+	case TxTypeRm: // Remove
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
@@ -159,6 +175,54 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
 		tree.Remove(key)
+	case TxTypeGet: // Get
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+		if len(tx) != 0 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		_, value, exists := tree.Get(key)
+		if exists {
+			return abci.OK.SetData(value)
+		} else {
+			return abci.ErrBaseUnknownAddress.AppendLog(fmt.Sprintf("Cannot find key: %X", key))
+		}
+	case TxTypeCompareAndSet: // Compare and Set
+		key, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading key: %v", err.Error()))
+		}
+		tx = tx[n:]
+
+		compareValue, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading compare value: %v", err.Error()))
+		}
+		tx = tx[n:]
+
+		setValue, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading set value: %v", err.Error()))
+		}
+		tx = tx[n:]
+
+		if len(tx) != 0 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
+		}
+
+		_, value, exists := tree.Get(key)
+		if !exists {
+			return abci.ErrBaseUnknownAddress.AppendLog(fmt.Sprintf("Cannot find key: %X", key))
+		}
+		if !bytes.Equal(value, compareValue) {
+			return abci.ErrUnauthorized.AppendLog(fmt.Sprintf("Value was %X, not %X", value, compareValue))
+		}
+		tree.Set(key, setValue)
+		// fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
 	default:
 		return abci.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
 	}

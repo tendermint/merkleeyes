@@ -7,35 +7,45 @@ import (
 	abci "github.com/tendermint/abci/types"
 	wire "github.com/tendermint/go-wire"
 	"github.com/tendermint/merkleeyes/iavl"
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
-func makeSet(key, value []byte) []byte {
-	tx := make([]byte, 1+wire.ByteSliceSize(key)+wire.ByteSliceSize(value))
-	buf := tx
-	buf[0] = WriteSet // Set TypeByte
-	buf = buf[1:]
-	n, err := wire.PutByteSlice(buf, key)
-	if err != nil {
-		panic(err)
+func makeTx(typ byte, args ...[]byte) []byte {
+	n := 12 + 1
+	for _, arg := range args {
+		n += wire.ByteSliceSize(arg)
 	}
-	buf = buf[n:]
-	n, err = wire.PutByteSlice(buf, value)
-	if err != nil {
-		panic(err)
+	tx := make([]byte, n)
+	buf := tx
+
+	// nonce
+	copy(buf[:12], cmn.RandBytes(12))
+	buf = buf[12:]
+
+	// type byte
+	buf[0] = typ
+	n = 1
+	var err error
+	for _, arg := range args {
+		buf = buf[n:]
+		n, err = wire.PutByteSlice(buf, arg)
+		if err != nil {
+			panic(err)
+		}
 	}
 	return tx
 }
 
+func makeSet(key, value []byte) []byte {
+	return makeTx(TxTypeSet, key, value)
+}
+
 func makeRemove(key []byte) []byte {
-	tx := make([]byte, 1+wire.ByteSliceSize(key))
-	buf := tx
-	buf[0] = WriteRem // Set TypeByte
-	buf = buf[1:]
-	_, err := wire.PutByteSlice(buf, key)
-	if err != nil {
-		panic(err)
-	}
-	return tx
+	return makeTx(TxTypeRm, key)
+}
+
+func makeGet(key []byte) []byte {
+	return makeTx(TxTypeGet, key)
 }
 
 func makeQuery(key []byte, prove bool, height uint64) (reqQuery abci.RequestQuery) {
@@ -59,15 +69,20 @@ func TestAppQueries(t *testing.T) {
 	key, value := []byte("foobar"), []byte("works!")
 	addTx := makeSet(key, value)
 	removeTx := makeRemove(key)
+	getTx := makeGet(key)
 
 	// need to commit append before it shows in queries
-	append := app.DeliverTx(addTx)
-	assert.True(append.IsOK(), append.Log)
+	txResult := app.DeliverTx(addTx)
+	assert.True(txResult.IsOK(), txResult.Log)
 	info = app.Info().Data
 	assert.Equal("size:0", info)
 	resQuery := app.Query(makeQuery(key, false, 0))
 	assert.True(resQuery.Code.IsOK(), resQuery.Log)
 	assert.Equal([]byte(nil), resQuery.Value)
+	// but get works before commit
+	txResult = app.DeliverTx(getTx)
+	assert.True(txResult.IsOK(), txResult.Log)
+	assert.EqualValues(txResult.Data, value)
 
 	com = app.Commit()
 	hash := com.Data
@@ -77,6 +92,8 @@ func TestAppQueries(t *testing.T) {
 	resQuery = app.Query(makeQuery(key, false, 0))
 	assert.True(resQuery.Code.IsOK(), resQuery.Log)
 	assert.Equal(value, resQuery.Value)
+	txResult = app.DeliverTx(getTx)
+	assert.EqualValues(txResult.Data, value)
 
 	// modifying check has no effect
 	check := app.CheckTx(removeTx)
@@ -89,8 +106,8 @@ func TestAppQueries(t *testing.T) {
 	assert.Equal("size:1", info)
 
 	// proofs come from the last commited state, not working state
-	append = app.DeliverTx(removeTx)
-	assert.True(append.IsOK(), append.Log)
+	txResult = app.DeliverTx(removeTx)
+	assert.True(txResult.IsOK(), txResult.Log)
 	// currently don't support specifying block height
 	resQuery = app.Query(makeQuery(key, true, 1))
 	assert.False(resQuery.Code.IsOK(), resQuery.Log)
@@ -119,4 +136,7 @@ func TestAppQueries(t *testing.T) {
 	assert.True(resQuery.Code.IsOK(), resQuery.Log)
 	assert.Equal([]byte(nil), resQuery.Value)
 	assert.Empty(resQuery.Proof)
+	// nor with get
+	txResult = app.DeliverTx(getTx)
+	assert.True(txResult.IsSameCode(abci.ErrBaseUnknownAddress), txResult.Log)
 }
