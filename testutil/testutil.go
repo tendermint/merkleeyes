@@ -4,10 +4,10 @@ import (
 	"testing"
 
 	"github.com/tendermint/abci/server"
-	. "github.com/tendermint/tmlibs/common"
 	wire "github.com/tendermint/go-wire"
 	"github.com/tendermint/merkleeyes/app"
 	eyes "github.com/tendermint/merkleeyes/client"
+	. "github.com/tendermint/tmlibs/common"
 )
 
 // NOTE: don't forget to close the client & server.
@@ -44,7 +44,7 @@ func MakeTxKV() ([]byte, []byte, []byte) {
 func makeSet(key, value []byte) []byte {
 	tx := make([]byte, 1+wire.ByteSliceSize(key)+wire.ByteSliceSize(value))
 	buf := tx
-	buf[0] = app.WriteSet // Set TypeByte
+	buf[0] = app.TxTypeSet // Set TypeByte
 	buf = buf[1:]
 	n, err := wire.PutByteSlice(buf, key)
 	if err != nil {
