@@ -25,11 +25,13 @@ So if `B = "eric"`, then `Encode(B) = 0x010465726963`
 
 ## Transactions
 
-There are two types of transaction, each associated with a type-byte and a list of arguments:
+There are four types of transaction, each associated with a type-byte and a list of arguments:
 
 ```
 Set			0x01		Key, Value
 Remove			0x02		Key
+Get			0x03		Key
+Compare and Set		0x04		Key, Compare Value, Set Value
 ```
 
 A transaction consists of the type-byte concatenated with the encoded arguments.
@@ -60,6 +62,8 @@ Here's a session from the [abci-cli](https://tendermint.com/intro/getting-starte
 ```
 
 # Poem
+
+To the tune of Eric Clapton's "My Father's Eyes"
 
 ```
 writing down, my checksum
