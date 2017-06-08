@@ -24,7 +24,7 @@ func (s State) Committed() merkle.Tree {
 	return s.committed
 }
 
-func (s State) Append() merkle.Tree {
+func (s State) Deliver() merkle.Tree {
 	return s.deliverTx
 }
 
@@ -32,7 +32,7 @@ func (s State) Check() merkle.Tree {
 	return s.checkTx
 }
 
-// Commit stores the current Append() state as committed
+// Commit stores the current Deliver() state as committed
 // starts new Append/Check state, and
 // returns the hash for the commit
 func (s *State) Commit() []byte {

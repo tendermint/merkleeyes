@@ -60,8 +60,6 @@ func TestAppQueries(t *testing.T) {
 	assert := assert.New(t)
 
 	app := NewMerkleEyesApp("", 0)
-	info := app.Info().Data
-	assert.Equal("size:0", info)
 	com := app.Commit()
 	assert.EqualValues([]byte(nil), com.Data)
 
@@ -69,32 +67,29 @@ func TestAppQueries(t *testing.T) {
 	key, value := []byte("foobar"), []byte("works!")
 	addTx := makeSet(key, value)
 	removeTx := makeRemove(key)
-	getTx := makeGet(key)
 
 	// need to commit append before it shows in queries
 	txResult := app.DeliverTx(addTx)
 	assert.True(txResult.IsOK(), txResult.Log)
-	info = app.Info().Data
-	assert.Equal("size:0", info)
 	resQuery := app.Query(makeQuery(key, false, 0))
 	assert.True(resQuery.Code.IsOK(), resQuery.Log)
 	assert.Equal([]byte(nil), resQuery.Value)
 	// but get works before commit
-	txResult = app.DeliverTx(getTx)
+	txResult = app.DeliverTx(makeGet(key))
 	assert.True(txResult.IsOK(), txResult.Log)
 	assert.EqualValues(txResult.Data, value)
 
 	com = app.Commit()
 	hash := com.Data
 	assert.NotEqual(t, nil, hash)
-	info = app.Info().Data
-	assert.Equal("size:1", info)
 	resQuery = app.Query(makeQuery(key, false, 0))
 	assert.True(resQuery.Code.IsOK(), resQuery.Log)
 	assert.Equal(value, resQuery.Value)
-	txResult = app.DeliverTx(getTx)
-	assert.EqualValues(txResult.Data, value)
+	txResult = app.DeliverTx(makeGet(key))
+	assert.EqualValues(txResult.Data, value, txResult.Error())
 
+	com = app.Commit()
+	hash = com.Data
 	// modifying check has no effect
 	check := app.CheckTx(removeTx)
 	assert.True(check.IsOK(), check.Log)
@@ -102,8 +97,6 @@ func TestAppQueries(t *testing.T) {
 	assert.True(com.IsOK(), com.Log)
 	hash2 := com.Data
 	assert.Equal(hash, hash2)
-	info = app.Info().Data
-	assert.Equal("size:1", info)
 
 	// proofs come from the last commited state, not working state
 	txResult = app.DeliverTx(removeTx)
@@ -115,7 +108,7 @@ func TestAppQueries(t *testing.T) {
 	if assert.NotEmpty(resQuery.Value) {
 		proof, err := iavl.ReadProof(resQuery.Proof)
 		if assert.Nil(err) {
-			assert.True(proof.Verify(key, resQuery.Value, proof.RootHash))
+			assert.True(proof.Verify(storeKey(key), resQuery.Value, proof.RootHash))
 		}
 	}
 
@@ -124,8 +117,6 @@ func TestAppQueries(t *testing.T) {
 	assert.True(com.IsOK(), com.Log)
 	hash3 := com.Data
 	assert.NotEqual(hash, hash3)
-	info = app.Info().Data
-	assert.Equal("size:0", info)
 
 	// nothing here...
 	resQuery = app.Query(makeQuery(key, false, 0))
@@ -137,6 +128,6 @@ func TestAppQueries(t *testing.T) {
 	assert.Equal([]byte(nil), resQuery.Value)
 	assert.Empty(resQuery.Proof)
 	// nor with get
-	txResult = app.DeliverTx(getTx)
+	txResult = app.DeliverTx(makeGet(key))
 	assert.True(txResult.IsSameCode(abci.ErrBaseUnknownAddress), txResult.Log)
 }

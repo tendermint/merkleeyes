@@ -34,32 +34,53 @@ Get			0x03		Key
 Compare and Set		0x04		Key, Compare Value, Set Value
 ```
 
-A transaction consists of the type-byte concatenated with the encoded arguments.
+A transaction consists of a 12-byte random nonce, the type-byte, and the encoded arguments.
 
-For instance, to insert a key-value pair, you would submit `01 | Encode(key) | Encode(value)`. 
+For instance, to insert a key-value pair, you would submit a transaction that looked like `NONCE | 01 | Encode(key) | Encode(value)`,
+where `|` denotes concatenation.
 Thus, a transaction inserting the key-value pair `(eric, clapton)` would look like:
 
 ```
-0x010104657269630107636c6170746f6e
+0xF4FCDC5BF26E227B66A1BA90010104657269630107636c6170746f6e
 ```
+
+The first 12-bytes, `F4FCDC5BF26E227B66A1BA90`, are the nonce. The next byte, `01`, is the transaction type.
+Following that are the encodings of `eric` and `clapton`.
 
 
 Here's a session from the [abci-cli](https://tendermint.com/intro/getting-started/first-abci):
 
 ```
-> deliver_tx 0x010104657269630107636c6170746f6e
+# SET ("eric", "clapton")
+> deliver_tx 0xF4FCDC5BF26E227B66A1BA90010104657269630107636c6170746f6e
 
+# GET ("eric")
+> deliver_tx 0xB980403FF73E79A3A2D90A1E03010465726963
+-> data: clapton
+-> data.hex: 636C6170746F6E
+
+# CAS ("eric", "clapton", "ericson")
+> deliver_tx 0x18D892B6D62773E6AA8804CF040104657269630107636C6170746F6E010765726963736f6e
+
+# GET ("eric")
+> deliver_tx 0x4FB9DAB513493E602FF085C603010465726963
+-> data: ericson
+-> data.hex: 65726963736F6E
+
+# COMMIT
 > commit
--> data: ��N��٢ek�X�!a��
--> data.hex: 978A4ED807D617D9A2651C6B0EC9588D2161C9E0
+-> data: ���Ώ�R�Ng�=HK}��7�
+-> data.hex: BAEDE5CE8F9A52B64E67873D484B7DABF69537DA
 
-> query 0x65726963                  
+# QUERY ("eric")
+> query 0x65726963
 -> height: 2
 -> key: eric
 -> key.hex: 65726963
--> value: clapton
--> value.hex: 636C6170746F6E
+-> value: ericson
+-> value.hex: 65726963736F6E
 ```
+
 
 # Poem
 

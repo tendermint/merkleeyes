@@ -110,7 +110,7 @@ func (app *MerkleEyesApp) CloseDB() {
 
 // Info implements abci.Application
 func (app *MerkleEyesApp) Info() abci.ResponseInfo {
-	return abci.ResponseInfo{Data: cmn.Fmt("size:%v", app.state.Committed().Size())}
+	return abci.ResponseInfo{Data: "merkleeyes"}
 }
 
 // SetOption implements abci.Application
@@ -120,7 +120,7 @@ func (app *MerkleEyesApp) SetOption(key string, value string) (log string) {
 
 // DeliverTx implements abci.Application
 func (app *MerkleEyesApp) DeliverTx(tx []byte) abci.Result {
-	tree := app.state.Append()
+	tree := app.state.Deliver()
 	return app.doTx(tree, tx)
 }
 
@@ -128,6 +128,14 @@ func (app *MerkleEyesApp) DeliverTx(tx []byte) abci.Result {
 func (app *MerkleEyesApp) CheckTx(tx []byte) abci.Result {
 	tree := app.state.Check()
 	return app.doTx(tree, tx)
+}
+
+func nonceKey(nonce []byte) []byte {
+	return append([]byte("/nonce/"), nonce...)
+}
+
+func storeKey(key []byte) []byte {
+	return append([]byte("/key/"), key...)
 }
 
 func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
@@ -140,10 +148,14 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 	nonce := tx[:12]
 	tx = tx[12:]
 
-	_, _, exists := tree.Get(append([]byte("/nonce/"), nonce...))
+	// check nonce
+	_, _, exists := tree.Get(nonceKey(nonce))
 	if exists {
 		return abci.ErrBadNonce.AppendLog(fmt.Sprintf("Nonce %X already exists", nonce))
 	}
+
+	// set nonce
+	tree.Set(nonceKey(nonce), []byte("found"))
 
 	typeByte := tx[0]
 	tx = tx[1:]
@@ -163,8 +175,8 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
 
-		tree.Set(key, value)
-		// fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
+		tree.Set(storeKey(key), value)
+		//		fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
 	case TxTypeRm: // Remove
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
@@ -174,7 +186,7 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 		if len(tx) != 0 {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
-		tree.Remove(key)
+		tree.Remove(storeKey(key))
 	case TxTypeGet: // Get
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
@@ -185,7 +197,8 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
 
-		_, value, exists := tree.Get(key)
+		//fmt.Println("GET", cmn.Fmt("%X", key))
+		_, value, exists := tree.Get(storeKey(key))
 		if exists {
 			return abci.OK.SetData(value)
 		} else {
@@ -214,14 +227,14 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
 
-		_, value, exists := tree.Get(key)
+		_, value, exists := tree.Get(storeKey(key))
 		if !exists {
 			return abci.ErrBaseUnknownAddress.AppendLog(fmt.Sprintf("Cannot find key: %X", key))
 		}
 		if !bytes.Equal(value, compareValue) {
 			return abci.ErrUnauthorized.AppendLog(fmt.Sprintf("Value was %X, not %X", value, compareValue))
 		}
-		tree.Set(key, setValue)
+		tree.Set(storeKey(key), setValue)
 		// fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
 	default:
 		return abci.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
@@ -270,7 +283,7 @@ func (app *MerkleEyesApp) Query(reqQuery abci.RequestQuery) (resQuery abci.Respo
 		key := reqQuery.Data // Data holds the key bytes
 		resQuery.Key = key
 		if reqQuery.Prove {
-			value, proof, exists := tree.Proof(key)
+			value, proof, exists := tree.Proof(storeKey(key))
 			if !exists {
 				resQuery.Log = "Key not found"
 			}
@@ -278,7 +291,7 @@ func (app *MerkleEyesApp) Query(reqQuery abci.RequestQuery) (resQuery abci.Respo
 			resQuery.Proof = proof
 			// TODO: return index too?
 		} else {
-			index, value, _ := tree.Get(key)
+			index, value, _ := tree.Get(storeKey(key))
 			resQuery.Value = value
 			resQuery.Index = int64(index)
 		}
