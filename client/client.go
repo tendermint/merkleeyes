@@ -5,6 +5,7 @@ import (
 	abci "github.com/tendermint/abci/types"
 	"github.com/tendermint/go-wire"
 	"github.com/tendermint/merkleeyes/app"
+	cmn "github.com/tendermint/tmlibs/common"
 )
 
 type Client struct {
@@ -79,9 +80,14 @@ func (client *Client) GetByIndex(index int64) (key []byte, value []byte, err err
 
 // Convenience KVStore interface
 func (client *Client) Set(key []byte, value []byte) {
-	tx := make([]byte, 1+wire.ByteSliceSize(key)+wire.ByteSliceSize(value))
+	tx := make([]byte, app.NonceLength+1+wire.ByteSliceSize(key)+wire.ByteSliceSize(value))
 	buf := tx
-	buf[0] = app.WriteSet // Set TypeByte
+
+	// nonce
+	copy(buf[:12], cmn.RandBytes(12))
+	buf = buf[12:]
+
+	buf[0] = app.TxTypeSet // Set TypeByte
 	buf = buf[1:]
 	n, err := wire.PutByteSlice(buf, key)
 	if err != nil {
@@ -100,9 +106,14 @@ func (client *Client) Set(key []byte, value []byte) {
 
 // Convenience
 func (client *Client) Remove(key []byte) {
-	tx := make([]byte, 1+wire.ByteSliceSize(key))
+	tx := make([]byte, app.NonceLength+1+wire.ByteSliceSize(key))
 	buf := tx
-	buf[0] = app.WriteRem // Rem TypeByte
+
+	// nonce
+	copy(buf[:12], cmn.RandBytes(12))
+	buf = buf[12:]
+
+	buf[0] = app.TxTypeRm // Rem TypeByte
 	buf = buf[1:]
 	_, err := wire.PutByteSlice(buf, key)
 	if err != nil {
