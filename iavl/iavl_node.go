@@ -6,8 +6,16 @@ import (
 
 	"golang.org/x/crypto/ripemd160"
 
-	. "github.com/tendermint/tmlibs/common"
 	"github.com/tendermint/go-wire"
+	. "github.com/tendermint/tmlibs/common"
+)
+
+// Keep track of the trees created by Copy, since we can'r just orphan
+// nodes if they are used in multiple places.
+var (
+	Committed *IAVLTree
+	DeliverTx *IAVLTree
+	CheckTx   *IAVLTree
 )
 
 // Node
@@ -513,6 +521,28 @@ func (node *IAVLNode) rmd(t *IAVLTree) *IAVLNode {
 	return node.getRightNode(t).rmd(t)
 }
 
+// findNode recursively looks to see if a persistent node is in a tree. The
+// key limits this to log N. This is only necessary for persistent nodes,
+// in-memory nodes are cleared through gc, which keeps accurate track of usage.
+func (node *IAVLNode) findNode(t *IAVLTree, match *IAVLNode) bool {
+	if node.persisted {
+		if bytes.Equal(match.hash, node.hash) {
+			return true
+		}
+		if node.height == 0 {
+			return false
+		}
+	} else if node.height == 0 {
+		return false
+	}
+	if bytes.Compare(match.key, node.key) < 0 {
+		return node.getLeftNode(t).findNode(t, match)
+	} else {
+		return node.getRightNode(t).findNode(t, match)
+	}
+
+}
+
 //----------------------------------------
 
 func removeOrphan(t *IAVLTree, node *IAVLNode) {
@@ -522,5 +552,31 @@ func removeOrphan(t *IAVLTree, node *IAVLNode) {
 	if t.ndb == nil {
 		return
 	}
+
+	// Don't orphan persistent nodes if another tree depends on it
+	if Committed != nil && t != Committed {
+		tree := Committed
+		exists := tree.root.findNode(tree, node)
+		if exists {
+			return
+		}
+	}
+
+	if DeliverTx != nil && t != DeliverTx {
+		tree := DeliverTx
+		exists := tree.root.findNode(tree, node)
+		if exists {
+			return
+		}
+	}
+
+	if CheckTx != nil && t != CheckTx {
+		tree := CheckTx
+		exists := tree.root.findNode(tree, node)
+		if exists {
+			return
+		}
+	}
+
 	t.ndb.RemoveNode(t, node)
 }
