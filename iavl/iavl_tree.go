@@ -235,7 +235,7 @@ func (t *IAVLTree) HashWithCount() ([]byte, int) {
 func (t *IAVLTree) Save() []byte {
 
 	first := t.roots.Front()
-	if first == nil {
+	if first == nil || first.Value == nil {
 		// Empty list
 		return nil
 	}
