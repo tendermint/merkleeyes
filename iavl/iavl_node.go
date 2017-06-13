@@ -11,7 +11,7 @@ import (
 	cmn "github.com/tendermint/tmlibs/common"
 )
 
-// Leaf and Inner nodes for an IAVLTree
+// IAVLNode holds Leaf and Inner nodes for an IAVLTree
 type IAVLNode struct {
 	key       []byte
 	value     []byte
