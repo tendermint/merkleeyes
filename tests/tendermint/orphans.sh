@@ -1,7 +1,5 @@
 #!/bin/bash
-#key=01036b6579837A272A2B
 key=01036b6579
-key=01045061756C
 
 function get() {
     echo "GET"
@@ -23,7 +21,6 @@ function cas() {
     v2=$2
     echo 0x${r}04${key}0101${v1}0101${v2} 
     curl localhost:46657/broadcast_tx_sync?tx=0x${r}04${key}0101${v1}0101${v2}
-    #curl localhost:46657/broadcast_tx_sync?tx=0x${r}0401220101${v1}0101${v2}
 }
 
 set 00
