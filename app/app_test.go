@@ -98,7 +98,9 @@ func TestAppQueries(t *testing.T) {
 	if assert.NotEmpty(resQuery.Value) {
 		proof, err := iavl.ReadProof(resQuery.Proof)
 		if assert.Nil(err) {
-			assert.True(proof.Verify(key, resQuery.Value, proof.RootHash))
+			// TODO: Fix me
+			version := 0
+			assert.True(proof.Verify(key, resQuery.Value, proof.RootHash, version))
 		}
 	}
 

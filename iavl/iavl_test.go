@@ -5,22 +5,367 @@ import (
 	"fmt"
 	mrand "math/rand"
 	"sort"
+	"sync"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ripemd160"
+
+	wire "github.com/tendermint/go-wire"
+	cmn "github.com/tendermint/tmlibs/common"
 	"github.com/tendermint/tmlibs/db"
-	"github.com/tendermint/go-wire"
-	. "github.com/tendermint/tmlibs/common"
-	. "github.com/tendermint/tmlibs/test"
+	test "github.com/tendermint/tmlibs/test"
 
 	"runtime"
 	"testing"
 )
 
+// List out the major operations
+const (
+	SETVALUE = iota
+	REMOVEVALUE
+	SAVETREE
+	COPYTREE
+)
+
+// A given action in the tests
+type action struct {
+	cmd     int
+	pair    *pair
+	status  bool
+	comment string
+}
+
+// Convenience struct for keeping the data together
+type pair struct {
+	key   string
+	value string
+}
+
+// Set to true if you want output
+var verbose bool = false
+
+// processActions and check their results
+func processActions(t *testing.T, tree *IAVLTree, actions []action) *IAVLTree {
+
+	for i := range actions {
+		tree = processAction(t, tree, i, &actions[i])
+	}
+	return tree
+}
+
+func processAction(t *testing.T, tree *IAVLTree, index int, next *action) *IAVLTree {
+
+	var status bool
+
+	switch next.cmd {
+	case SETVALUE:
+		if verbose {
+			fmt.Printf("Doing a Set for %x\n", next.pair.key)
+		}
+		status = tree.Set([]byte(next.pair.key), []byte(next.pair.value))
+
+	case REMOVEVALUE:
+		if verbose {
+			fmt.Printf("Doing a Remove %x\n", next.pair.key)
+		}
+		_, status = tree.Remove([]byte(next.pair.key))
+
+	case SAVETREE:
+		if verbose {
+			fmt.Printf("Doing a Save for the Tree\n")
+		}
+		bytes := tree.Save()
+		status = bytes != nil
+
+	case COPYTREE:
+		if verbose {
+			fmt.Printf("Doing a Copy of the Tree\n")
+		}
+		tree = tree.Copy().(*IAVLTree)
+		status = true
+	}
+
+	if status != next.status {
+		text := fmt.Sprintf("%d) %s status=%v", index, next.comment, status)
+		t.Error(text)
+	}
+
+	return tree
+}
+
+func NextKey(series string, index int, lastHash []byte) []byte {
+	var buffer []byte
+
+	buffer = append(buffer, series...)
+	buffer = append(buffer, string(index)...)
+
+	if lastHash != nil {
+		buffer = append(buffer, lastHash...)
+	}
+
+	hasher := ripemd160.New()
+	hasher.Write(buffer)
+	hash := hasher.Sum(nil)
+
+	return hash
+}
+
+var pairs []pair = []pair{
+	pair{"aaaaa", "value of a"},
+	pair{"bbbbb", "value of b"},
+	pair{"ccccc", "value of c"},
+	pair{"ddddd", "value of d"},
+	pair{"00001", "value of one"},
+	pair{"00002", "value of two"},
+	pair{"00003", "value of three"},
+	pair{"00004", "value of four"},
+}
+
+// Roughly ma
+func TestCopy(t *testing.T) {
+	copy := []action{
+		action{COPYTREE, nil, true, "Should do a copy"},
+	}
+
+	db := db.NewDB("TestCopy", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.BatchDeleteAll()
+
+	for i := 0; i < 10; i++ {
+		// Make a copy of the tree
+		other_tree := processActions(t, tree, copy)
+
+		size := 3000
+		start := i * size
+		stop := (i + 1) * size
+
+		var group sync.WaitGroup
+		group.Add(2)
+
+		// Essentially the main copy of the tree, lets add lots of stuff
+		go func() {
+			defer group.Done()
+			var hash []byte
+			for step := start; step < stop; step++ {
+				hash = NextKey("A", step, hash)
+				act := &action{SETVALUE, &pair{string(hash), "value of " + string(hash)}, false, "Create"}
+				tree = processAction(t, tree, step, act)
+			}
+		}()
+
+		// A second copy in memory, repeat the first work, but also add in a second set
+		go func() {
+			defer group.Done()
+			var hash1 []byte
+			var hash2 []byte
+			for step := start; step < stop; step++ {
+
+				hash1 = NextKey("B", step, hash1)
+				act1 := &action{SETVALUE, &pair{string(hash1), "value of " + string(hash1)}, false, "Create"}
+				other_tree = processAction(t, other_tree, step, act1)
+
+				hash2 = NextKey("A", step, hash2)
+				act2 := &action{SETVALUE, &pair{string(hash2), "value of " + string(hash2)}, false, "Create"}
+				other_tree = processAction(t, other_tree, step, act2)
+			}
+		}()
+
+		// Wait until both have completed
+		group.Wait()
+
+		// Commit the mess
+		act := &action{SAVETREE, nil, true, "Save"}
+		tree = processAction(t, tree, 0, act)
+	}
+
+	// Okay, now lets see if we can delete everything
+	var hash []byte
+	for step := 0; step < 3000*10; step++ {
+		if step%3000 == 0 {
+			hash = nil
+		}
+		hash = NextKey("A", step, hash)
+		act := &action{REMOVEVALUE, &pair{string(hash), "value of " + string(hash)}, true, "Create"}
+		tree = processAction(t, tree, step, act)
+	}
+
+	// And Save it, a lot forcing pruning.
+	for i := 0; i < 1001; i++ {
+		act := &action{SAVETREE, nil, false, "Save"}
+		tree = processAction(t, tree, 0, act)
+	}
+}
+
+func TestTable(t *testing.T) {
+
+	actions := []action{
+		// Add four values
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SETVALUE, &pairs[1], false, "Should be a create"},
+		action{SETVALUE, &pairs[2], false, "Should be a create"},
+		action{SETVALUE, &pairs[3], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		// Modify two
+		action{SETVALUE, &pairs[2], true, "Should be an update"},
+		action{SETVALUE, &pairs[3], true, "Should be an update"},
+		action{SETVALUE, &pairs[4], false, "Should be an create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		// Mess around
+		action{REMOVEVALUE, &pairs[2], true, "Should remove"},
+		action{SETVALUE, &pairs[2], false, "Should be an create"},
+		action{SETVALUE, &pairs[3], true, "Should be an update"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{SETVALUE, &pairs[4], true, "Should be a update"},
+		action{SETVALUE, &pairs[5], false, "Should be a create"},
+		action{SETVALUE, &pairs[6], false, "Should be a create"},
+		action{SETVALUE, &pairs[7], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[1], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[2], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[3], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[4], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[5], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[6], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[7], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	db := db.NewDB("TestTable", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.DeleteAll()
+
+	for i := 0; i < 10; i++ {
+		processActions(t, tree, actions)
+	}
+}
+
+func TestGrowth(t *testing.T) {
+
+	initial_actions := []action{
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SETVALUE, &pairs[1], false, "Should be a create"},
+		action{SETVALUE, &pairs[2], false, "Should be a create"},
+		action{SETVALUE, &pairs[3], false, "Should be a create"},
+		action{SETVALUE, &pairs[4], false, "Should be a create"},
+		action{SETVALUE, &pairs[5], false, "Should be a create"},
+		action{SETVALUE, &pairs[6], false, "Should be a create"},
+		action{SETVALUE, &pairs[7], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+	}
+
+	actions := []action{
+		action{SETVALUE, &pairs[0], true, "Should be a update"},
+		action{SETVALUE, &pairs[1], true, "Should be a update"},
+		action{SETVALUE, &pairs[2], true, "Should be a update"},
+		action{SETVALUE, &pairs[3], true, "Should be a update"},
+		action{SETVALUE, &pairs[4], true, "Should be a update"},
+		action{SETVALUE, &pairs[5], true, "Should be a update"},
+		action{SETVALUE, &pairs[6], true, "Should be a update"},
+		action{SETVALUE, &pairs[7], true, "Should be a update"},
+		action{SAVETREE, nil, true, "Should return a value"},
+	}
+
+	final_actions := []action{
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[1], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[2], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[3], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[4], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[5], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[6], true, "Should remove"},
+		action{REMOVEVALUE, &pairs[7], true, "Should remove"},
+
+		// Clear it enough to force all orphans to be deleted
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	clear := []action{
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	db := db.NewDB("TestGrowth", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.DeleteAll()
+
+	processActions(t, tree, initial_actions)
+
+	for i := 0; i < 1000; i++ {
+		processActions(t, tree, actions)
+	}
+
+	processActions(t, tree, final_actions)
+
+	for i := 0; i < 1000; i++ {
+		processActions(t, tree, clear)
+	}
+}
+
+func TestEmptyTable(t *testing.T) {
+
+	actions := []action{
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		// Add four values
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		action{SETVALUE, &pairs[0], false, "Should be a create"},
+		action{SAVETREE, nil, true, "Should return a value"},
+		action{REMOVEVALUE, &pairs[0], true, "Should remove"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+		action{SAVETREE, nil, false, "Should not return a value"},
+	}
+
+	db := db.NewDB("TestEmptyTable", "goleveldb", "./")
+	var tree *IAVLTree = NewIAVLTree(0, db)
+
+	// make sure there is nothing in this database if it already exists
+	tree.ndb.DeleteAll()
+
+	for i := 0; i < 1; i++ {
+		processActions(t, tree, actions)
+	}
+}
+
 const testReadLimit = 1 << 20 // Some reasonable limit for wire.Read*() lmt
 
 func randstr(length int) string {
-	return RandStr(length)
+	return cmn.RandStr(length)
 }
 
 func i2b(i int) []byte {
@@ -40,12 +385,12 @@ func N(l, r interface{}) *IAVLNode {
 	if _, ok := l.(*IAVLNode); ok {
 		left = l.(*IAVLNode)
 	} else {
-		left = NewIAVLNode(i2b(l.(int)), nil)
+		left = NewIAVLNode(i2b(l.(int)), nil, 0)
 	}
 	if _, ok := r.(*IAVLNode); ok {
 		right = r.(*IAVLNode)
 	} else {
-		right = NewIAVLNode(i2b(r.(int)), nil)
+		right = NewIAVLNode(i2b(r.(int)), nil, 0)
 	}
 
 	n := &IAVLNode{
@@ -64,7 +409,7 @@ func T(n *IAVLNode) *IAVLTree {
 	t := NewIAVLTree(0, d)
 
 	n.hashWithCount(t)
-	t.root = n
+	SetValue(t.roots, 0, n)
 	return t
 }
 
@@ -74,6 +419,96 @@ func P(n *IAVLNode) string {
 		return fmt.Sprintf("%v", b2i(n.key))
 	} else {
 		return fmt.Sprintf("(%v %v)", P(n.leftNode), P(n.rightNode))
+	}
+}
+
+func UnfinishedTestOrder(t *testing.T) {
+	var tree *IAVLTree = NewIAVLTree(0, nil)
+	var up bool
+	up = tree.Set([]byte("aaaaaa"), []byte("aaaaaa"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	up = tree.Set([]byte("bbbbbb"), []byte("bbbbbb"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	up = tree.Set([]byte("cccccc"), []byte("cccccc"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	up = tree.Set([]byte("dddddd"), []byte("dddddd"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	up = tree.Set([]byte("eeeeee"), []byte("eeeeeee"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	up = tree.Set([]byte("ffffff"), []byte("fffffff"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	up = tree.Set([]byte("gggggg"), []byte("ggggggg"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	for i := 0; i < 7; i++ {
+		key, value := tree.GetByIndex(i)
+		fmt.Printf("%d) %s - %s\n", i, string(key), string(value))
+	}
+}
+
+func TestHistory(t *testing.T) {
+	var tree *IAVLTree = NewIAVLTree(0, nil)
+	var up bool
+	up = tree.Set([]byte("1"), []byte("one"))
+	if up {
+		t.Error("Did not expect an update (should have been create)")
+	}
+	_, up = tree.Remove([]byte("1"))
+	if !up {
+		t.Error("Did not remove")
+	}
+	up = tree.Set([]byte("1"), []byte("one"))
+	if up {
+		t.Error("Expected an update (should have been create)")
+	}
+	bytes := tree.Save()
+	if bytes == nil {
+		t.Error("Saved should have worked, but got nothing")
+	}
+	up = tree.Set([]byte("1"), []byte("one"))
+	if !up {
+		t.Error("Expected an update (not a create)")
+	}
+	up = tree.Set([]byte("2"), []byte("two"))
+	if up {
+		t.Error("Expected an update (not a create)")
+	}
+	bytes = tree.Save()
+	if bytes == nil {
+		t.Error("Saved should have worked, but got nothing")
+	}
+	_, up = tree.Remove([]byte("1"))
+	if !up {
+		t.Error("Did not remove")
+	}
+	_, up = tree.Remove([]byte("2"))
+	if !up {
+		t.Error("Did not remove")
+	}
+	bytes = tree.Save()
+	if bytes != nil {
+		t.Error("Tree should have been empty")
+	}
+	up = tree.Set([]byte("1"), []byte("one"))
+	if up {
+		t.Error("Expected an create (not an update)")
+	}
+	bytes = tree.Save()
+	if bytes == nil {
+		t.Error("Saved should have worked, but got nothing")
 	}
 }
 
@@ -163,7 +598,8 @@ func TestUnit(t *testing.T) {
 			t.Fatalf("Expected %v new hashes, got %v", hashCount, count)
 		}
 		// nuke hashes and reconstruct hash, ensure it's the same.
-		tree.root.traverse(tree, true, func(node *IAVLNode) bool {
+		root := tree.GetRoot(tree.version)
+		root.traverse(tree, true, func(node *IAVLNode) bool {
 			node.hash = nil
 			return false
 		})
@@ -175,29 +611,29 @@ func TestUnit(t *testing.T) {
 	}
 
 	expectSet := func(tree *IAVLTree, i int, repr string, hashCount int) {
-		origNode := tree.root
+		origNode := tree.GetRoot(tree.version)
 		updated := tree.Set(i2b(i), nil)
 		// ensure node was added & structure is as expected.
-		if updated == true || P(tree.root) != repr {
+		if updated == true || P(tree.GetRoot(tree.version)) != repr {
 			t.Fatalf("Adding %v to %v:\nExpected         %v\nUnexpectedly got %v updated:%v",
-				i, P(origNode), repr, P(tree.root), updated)
+				i, P(origNode), repr, P(tree.GetRoot(tree.version)), updated)
 		}
 		// ensure hash calculation requirements
 		expectHash(tree, hashCount)
-		tree.root = origNode
+		SetValue(tree.roots, 0, origNode)
 	}
 
 	expectRemove := func(tree *IAVLTree, i int, repr string, hashCount int) {
-		origNode := tree.root
+		origNode := tree.GetRoot(tree.version)
 		value, removed := tree.Remove(i2b(i))
 		// ensure node was added & structure is as expected.
-		if len(value) != 0 || !removed || P(tree.root) != repr {
+		if len(value) != 0 || !removed || P(tree.GetRoot(tree.version)) != repr {
 			t.Fatalf("Removing %v from %v:\nExpected         %v\nUnexpectedly got %v value:%v removed:%v",
-				i, P(origNode), repr, P(tree.root), value, removed)
+				i, P(origNode), repr, P(tree.GetRoot(tree.version)), value, removed)
 		}
 		// ensure hash calculation requirements
 		expectHash(tree, hashCount)
-		tree.root = origNode
+		SetValue(tree.roots, 0, origNode)
 	}
 
 	//////// Test Set cases:
@@ -250,6 +686,7 @@ func TestRemove(t *testing.T) {
 
 	d := db.NewDB("test", "memdb", "")
 	defer d.Close()
+
 	t1 := NewIAVLTree(size, d)
 
 	// insert a bunch of random nodes
@@ -475,33 +912,33 @@ func TestPersistence(t *testing.T) {
 	}
 }
 
-func testProof(t *testing.T, proof *IAVLProof, keyBytes, valueBytes, rootHashBytes []byte) {
+func testProof(t *testing.T, proof *IAVLProof, keyBytes, valueBytes, rootHashBytes []byte, version int) {
 	// Proof must verify.
-	require.True(t, proof.Verify(keyBytes, valueBytes, rootHashBytes))
+	require.True(t, proof.Verify(keyBytes, valueBytes, rootHashBytes, version))
 
 	// Write/Read then verify.
 	proofBytes := wire.BinaryBytes(proof)
 	proof2, err := ReadProof(proofBytes)
 	require.Nil(t, err, "Failed to read IAVLProof from bytes: %v", err)
-	require.True(t, proof2.Verify(keyBytes, valueBytes, proof.RootHash))
+	require.True(t, proof2.Verify(keyBytes, valueBytes, proof.RootHash, version))
 
 	// Random mutations must not verify
 	for i := 0; i < 10; i++ {
-		badProofBytes := MutateByteSlice(proofBytes)
+		badProofBytes := test.MutateByteSlice(proofBytes)
 		badProof, err := ReadProof(badProofBytes)
 		// may be invalid... errors are okay
 		if err == nil {
-			assert.False(t, badProof.Verify(keyBytes, valueBytes, rootHashBytes),
+			assert.False(t, badProof.Verify(keyBytes, valueBytes, rootHashBytes, version),
 				"Proof was still valid after a random mutation:\n%X\n%X",
 				proofBytes, badProofBytes)
 		}
 	}
 
 	// targetted changes fails...
-	proof.RootHash = MutateByteSlice(proof.RootHash)
-	assert.False(t, proof.Verify(keyBytes, valueBytes, rootHashBytes))
-	proof2.LeafHash = MutateByteSlice(proof2.LeafHash)
-	assert.False(t, proof2.Verify(keyBytes, valueBytes, rootHashBytes))
+	proof.RootHash = test.MutateByteSlice(proof.RootHash)
+	assert.False(t, proof.Verify(keyBytes, valueBytes, rootHashBytes, version))
+	proof2.LeafHash = test.MutateByteSlice(proof2.LeafHash)
+	assert.False(t, proof2.Verify(keyBytes, valueBytes, rootHashBytes, version))
 }
 
 func TestIAVLProof(t *testing.T) {
@@ -524,10 +961,10 @@ func TestIAVLProof(t *testing.T) {
 
 	// Now for each item, construct a proof and verify
 	tree.Iterate(func(key []byte, value []byte) bool {
-		value2, proof := tree.ConstructProof(key)
+		value2, version, proof := tree.ConstructProof(key, tree.version)
 		assert.Equal(t, value, value2)
 		if assert.NotNil(t, proof) {
-			testProof(t, proof, key, value, tree.Hash())
+			testProof(t, proof, key, value, tree.Hash(), version)
 		}
 		return false
 	})
@@ -554,13 +991,13 @@ func TestIAVLTreeProof(t *testing.T) {
 	assert.False(t, exists)
 
 	// valid proof for real keys
-	root := tree.Hash()
+	hash := tree.Hash()
 	for _, key := range keys {
 		value, proofBytes, exists := tree.Proof(key)
 		if assert.True(t, exists) {
 			proof, err := ReadProof(proofBytes)
 			require.Nil(t, err, "Failed to read IAVLProof from bytes: %v", err)
-			assert.True(t, proof.Verify(key, value, root))
+			assert.True(t, proof.Verify(key, value, hash, tree.version))
 		}
 	}
 }
@@ -573,7 +1010,7 @@ func BenchmarkImmutableAvlTreeCLevelDB(b *testing.B) {
 	// for i := 0; i < 10000000; i++ {
 	for i := 0; i < 1000000; i++ {
 		// for i := 0; i < 1000; i++ {
-		t.Set(i2b(int(RandInt32())), nil)
+		t.Set(i2b(int(cmn.RandInt32())), nil)
 		if i > 990000 && i%1000 == 999 {
 			t.Save()
 		}
@@ -586,7 +1023,7 @@ func BenchmarkImmutableAvlTreeCLevelDB(b *testing.B) {
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		ri := i2b(int(RandInt32()))
+		ri := i2b(int(cmn.RandInt32()))
 		t.Set(ri, nil)
 		t.Remove(ri)
 		if i%100 == 99 {
@@ -605,7 +1042,7 @@ func BenchmarkImmutableAvlTreeMemDB(b *testing.B) {
 	// for i := 0; i < 10000000; i++ {
 	for i := 0; i < 1000000; i++ {
 		// for i := 0; i < 1000; i++ {
-		t.Set(i2b(int(RandInt32())), nil)
+		t.Set(i2b(int(cmn.RandInt32())), nil)
 		if i > 990000 && i%1000 == 999 {
 			t.Save()
 		}
@@ -618,7 +1055,7 @@ func BenchmarkImmutableAvlTreeMemDB(b *testing.B) {
 
 	b.StartTimer()
 	for i := 0; i < b.N; i++ {
-		ri := i2b(int(RandInt32()))
+		ri := i2b(int(cmn.RandInt32()))
 		t.Set(ri, nil)
 		t.Remove(ri)
 		if i%100 == 99 {

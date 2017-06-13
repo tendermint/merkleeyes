@@ -32,6 +32,14 @@ func mixedDisplay(value []byte) string {
 				}
 				ascii = false
 			}
+		} else {
+			/*
+				if !ascii && len(last) > 0 {
+					buffer.WriteString(fmt.Sprintf("%X", last))
+					last = nil
+					ascii = true
+				}
+			*/
 		}
 		last = append(last, value[i])
 	}
@@ -91,8 +99,8 @@ func nodeMapping(node *IAVLNode) string {
 	}
 
 	if node.height == 0 {
-		return fmt.Sprintf(" LeafNode[height: %d, size %d, key: %s, value: %s]",
-			node.height, node.size, formattedKey, formattedValue)
+		return fmt.Sprintf(" LeafNode[height: %d, size %d, version %d, key: %s, value: %s]",
+			node.height, node.size, node.version, formattedKey, formattedValue)
 	} else {
 		return fmt.Sprintf("InnerNode[height: %d, size %d, key: %s, leftHash: %X, rightHash: %X]",
 			node.height, node.size, formattedKey, node.leftHash, node.rightHash)
@@ -112,7 +120,7 @@ func overallMapping(value []byte) (str string) {
 	// test to see if this is a node
 	node, err := MakeIAVLNode(value, nil)
 
-	if err == nil && node.height < 100 && node.key != nil {
+	if err == nil && node.height < 100 && node.version < 1000 && node.key != nil {
 		return nodeMapping(node)
 	}
 
@@ -122,7 +130,7 @@ func overallMapping(value []byte) (str string) {
 
 // Dump everything from the database
 func (t *IAVLTree) Dump(verbose bool, mapping *KeyValueMapping) {
-	if verbose && t.root == nil {
+	if verbose && t.roots.Len() == 0 {
 		fmt.Printf("No root loaded into memory\n")
 	}
 
