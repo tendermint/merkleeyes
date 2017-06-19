@@ -41,6 +41,7 @@ func NewIAVLTree(cacheSize int, db dbm.DB) *IAVLTree {
 // Note that Save() clears leftNode and rightNode.  Otherwise,
 // two copies would not be goroutine independent.
 func (t *IAVLTree) Copy() merkle.Tree {
+
 	if t.root == nil {
 		return &IAVLTree{
 			root: nil,
@@ -58,10 +59,21 @@ func (t *IAVLTree) Copy() merkle.Tree {
 		// calculated.
 		t.root.hashWithCount(t)
 	}
-	return &IAVLTree{
+
+	copy := &IAVLTree{
 		root: t.root,
 		ndb:  t.ndb,
 	}
+
+	// Keep track of the trees we create.
+	// Assumes Saves are followed by 2 or less Copies (3 trees)
+	if DeliverTx == nil {
+		Committed = t
+		DeliverTx = copy
+	} else {
+		CheckTx = copy
+	}
+	return copy
 }
 
 func (t *IAVLTree) Size() int {
@@ -126,6 +138,12 @@ func (t *IAVLTree) Save() []byte {
 		t.root.save(t)
 		t.ndb.Commit()
 	}
+
+	// Clear out the copies (assumes code will too)
+	Committed = nil
+	DeliverTx = nil
+	CheckTx = nil
+
 	return t.root.hash
 }
 
