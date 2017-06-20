@@ -45,6 +45,10 @@ func NewIAVLTree(cacheSize int, db dbm.DB) *IAVLTree {
 	}
 }
 
+func ClearTreeStatus() {
+	initialized = false
+}
+
 // The returned tree and the original tree are goroutine independent.
 // That is, they can each run in their own goroutine.
 // However, upon Save(), any other trees that share a db will become

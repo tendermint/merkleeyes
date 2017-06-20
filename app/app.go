@@ -104,6 +104,7 @@ func NewMerkleEyesApp(dbName string, cacheSize int) *MerkleEyesApp {
 // CloseDB closes the database
 func (app *MerkleEyesApp) CloseDB() {
 	if app.db != nil {
+		iavl.ClearTreeStatus()
 		app.db.Close()
 	}
 }
