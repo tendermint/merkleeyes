@@ -10,14 +10,6 @@ import (
 	. "github.com/tendermint/tmlibs/common"
 )
 
-// Keep track of the trees created by Copy, since we can'r just orphan
-// nodes if they are used in multiple places.
-var (
-	Committed *IAVLTree
-	DeliverTx *IAVLTree
-	CheckTx   *IAVLTree
-)
-
 // Node
 
 type IAVLNode struct {
@@ -553,30 +545,8 @@ func removeOrphan(t *IAVLTree, node *IAVLNode) {
 		return
 	}
 
-	// Don't orphan persistent nodes if another tree depends on it
-	if Committed != nil && t != Committed {
-		tree := Committed
-		exists := tree.root.findNode(tree, node)
-		if exists {
-			return
-		}
+	// We only orphan from the original tree, nothing else
+	if !t.copy {
+		t.ndb.RemoveNode(t, node)
 	}
-
-	if DeliverTx != nil && t != DeliverTx {
-		tree := DeliverTx
-		exists := tree.root.findNode(tree, node)
-		if exists {
-			return
-		}
-	}
-
-	if CheckTx != nil && t != CheckTx {
-		tree := CheckTx
-		exists := tree.root.findNode(tree, node)
-		if exists {
-			return
-		}
-	}
-
-	t.ndb.RemoveNode(t, node)
 }

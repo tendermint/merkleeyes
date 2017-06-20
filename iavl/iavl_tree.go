@@ -18,18 +18,29 @@ This tree is not goroutine safe.
 type IAVLTree struct {
 	root *IAVLNode
 	ndb  *nodeDB
+	copy bool
 }
+
+var initialized = false
 
 // NewIAVLTree creates both im-memory and persistent instances
 func NewIAVLTree(cacheSize int, db dbm.DB) *IAVLTree {
 	if db == nil {
 		// In-memory IAVLTree
 		return &IAVLTree{}
+
 	} else {
+
+		if initialized {
+			panic("Creating multiple trees, use Copy() instead")
+		}
+		initialized = true
+
 		// Persistent IAVLTree
 		ndb := newNodeDB(cacheSize, db)
 		return &IAVLTree{
-			ndb: ndb,
+			ndb:  ndb,
+			copy: false,
 		}
 	}
 }
@@ -60,20 +71,11 @@ func (t *IAVLTree) Copy() merkle.Tree {
 		t.root.hashWithCount(t)
 	}
 
-	copy := &IAVLTree{
+	return &IAVLTree{
 		root: t.root,
 		ndb:  t.ndb,
+		copy: true,
 	}
-
-	// Keep track of the trees we create.
-	// Assumes Saves are followed by 2 or less Copies (3 trees)
-	if DeliverTx == nil {
-		Committed = t
-		DeliverTx = copy
-	} else {
-		CheckTx = copy
-	}
-	return copy
 }
 
 func (t *IAVLTree) Size() int {
@@ -131,6 +133,11 @@ func (t *IAVLTree) HashWithCount() ([]byte, int) {
 }
 
 func (t *IAVLTree) Save() []byte {
+	if t.copy {
+		hash, _ := t.root.hashWithCount(t)
+		return hash
+	}
+
 	if t.root == nil {
 		return nil
 	}
@@ -138,11 +145,6 @@ func (t *IAVLTree) Save() []byte {
 		t.root.save(t)
 		t.ndb.Commit()
 	}
-
-	// Clear out the copies (assumes code will too)
-	Committed = nil
-	DeliverTx = nil
-	CheckTx = nil
 
 	return t.root.hash
 }
