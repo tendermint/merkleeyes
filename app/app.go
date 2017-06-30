@@ -121,13 +121,18 @@ func (app *MerkleEyesApp) SetOption(key string, value string) (log string) {
 // DeliverTx implements abci.Application
 func (app *MerkleEyesApp) DeliverTx(tx []byte) abci.Result {
 	tree := app.state.Deliver()
-	return app.doTx(tree, tx)
+	r := app.doTx(tree, tx)
+	if r.IsErr() {
+		fmt.Println("DeliverTx Err", r)
+	}
+	return r
 }
 
 // CheckTx implements abci.Application
 func (app *MerkleEyesApp) CheckTx(tx []byte) abci.Result {
-	tree := app.state.Check()
-	return app.doTx(tree, tx)
+	return abci.OK
+	// tree := app.state.Check()
+	// return app.doTx(tree, tx)
 }
 
 func nonceKey(nonce []byte) []byte {
@@ -176,7 +181,8 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 		}
 
 		tree.Set(storeKey(key), value)
-		//		fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
+
+		fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
 	case TxTypeRm: // Remove
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
@@ -187,6 +193,7 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
 		tree.Remove(storeKey(key))
+		fmt.Println("RM", cmn.Fmt("%X", key))
 	case TxTypeGet: // Get
 		key, n, err := wire.GetByteSlice(tx)
 		if err != nil {
@@ -197,9 +204,9 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Got bytes left over"))
 		}
 
-		//fmt.Println("GET", cmn.Fmt("%X", key))
 		_, value, exists := tree.Get(storeKey(key))
 		if exists {
+			fmt.Println("GET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
 			return abci.OK.SetData(value)
 		} else {
 			return abci.ErrBaseUnknownAddress.AppendLog(fmt.Sprintf("Cannot find key: %X", key))
@@ -235,7 +242,8 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrUnauthorized.AppendLog(fmt.Sprintf("Value was %X, not %X", value, compareValue))
 		}
 		tree.Set(storeKey(key), setValue)
-		// fmt.Println("SET", cmn.Fmt("%X", key), cmn.Fmt("%X", value))
+
+		fmt.Println("CAS-SET", cmn.Fmt("%X", key), cmn.Fmt("%X", compareValue), cmn.Fmt("%X", setValue))
 	default:
 		return abci.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
 	}
