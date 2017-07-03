@@ -20,6 +20,8 @@ type MerkleEyesApp struct {
 	state  State
 	db     dbm.DB
 	height uint64
+
+	changes []*abci.Validator
 }
 
 // just make sure we really are an application, if the interface
@@ -42,6 +44,7 @@ const (
 	TxTypeRm            byte = 0x02
 	TxTypeGet           byte = 0x03
 	TxTypeCompareAndSet byte = 0x04
+	TxTypeValSetChange  byte = 0x05
 
 	NonceLength = 12
 )
@@ -244,10 +247,68 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 		tree.Set(storeKey(key), setValue)
 
 		fmt.Println("CAS-SET", cmn.Fmt("%X", key), cmn.Fmt("%X", compareValue), cmn.Fmt("%X", setValue))
+	case TxTypeValSetChange:
+		pubKey, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading pubkey: %v", err.Error()))
+		}
+		if len(pubKey) != 32 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Pubkey must be 32 bytes: %X is %d bytes", pubKey, len(pubKey)))
+		}
+		tx = tx[n:]
+
+		power := wire.GetInt64(tx)
+
+		// copy to PubKeyEd25519 so we can go-wire encode properly
+		var pubKeyEd PubKeyEd25519
+		copy(pubKeyEd[:], pubKey)
+		return app.updateValidator(&abci.Validator{pubKeyEd.Bytes(), uint64(power)})
+
 	default:
 		return abci.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
 	}
 	return abci.OK
+}
+
+func (app *MerkleEyesApp) updateValidator(v *abci.Validator) abci.Result {
+	key := []byte("val:" + string(v.PubKey))
+	if v.Power == 0 {
+		// remove validator
+		if !app.state.deliverTx.Has(key) {
+			return abci.ErrUnauthorized.SetLog(cmn.Fmt("Cannot remove non-existent validator %X", key))
+		}
+		app.state.deliverTx.Remove(key)
+	} else {
+		// add or update validator
+		value := bytes.NewBuffer(make([]byte, 0))
+		if err := abci.WriteMessage(v, value); err != nil {
+			return abci.ErrInternalError.SetLog(cmn.Fmt("Error encoding validator: %v", err))
+		}
+		app.state.deliverTx.Set(key, value.Bytes())
+	}
+
+	// we only update the changes array if we succesfully updated the tree
+	app.changes = append(app.changes, v)
+
+	return abci.OK
+}
+
+func (app *MerkleEyesApp) InitChain(validators []*abci.Validator) {
+	for _, v := range validators {
+		r := app.updateValidator(v)
+		if r.IsErr() {
+			fmt.Println("Error updating validators", r)
+		}
+	}
+}
+
+func (app *MerkleEyesApp) BeginBlock(hash []byte, header *abci.Header) {
+	// reset valset changes
+	app.changes = make([]*abci.Validator, 0)
+}
+
+func (app *MerkleEyesApp) EndBlock(height uint64) (resEndBlock abci.ResponseEndBlock) {
+	return abci.ResponseEndBlock{Diffs: app.changes}
 }
 
 // Commit implements abci.Application
