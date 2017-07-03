@@ -6,6 +6,7 @@ import (
 	"path"
 
 	abci "github.com/tendermint/abci/types"
+	"github.com/tendermint/go-crypto"
 	"github.com/tendermint/go-wire"
 	"github.com/tendermint/merkleeyes/iavl"
 	cmn "github.com/tendermint/tmlibs/common"
@@ -260,7 +261,7 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 		power := wire.GetInt64(tx)
 
 		// copy to PubKeyEd25519 so we can go-wire encode properly
-		var pubKeyEd PubKeyEd25519
+		var pubKeyEd crypto.PubKeyEd25519
 		copy(pubKeyEd[:], pubKey)
 		return app.updateValidator(&abci.Validator{pubKeyEd.Bytes(), uint64(power)})
 
