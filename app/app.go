@@ -257,8 +257,10 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 			return abci.ErrEncodingError.SetLog(cmn.Fmt("Pubkey must be 32 bytes: %X is %d bytes", pubKey, len(pubKey)))
 		}
 		tx = tx[n:]
-
-		power := wire.GetInt64(tx)
+		if len(tx) != 8 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Power must be 8 bytes: %X is %d bytes", tx, len(tx)))
+		}
+		power := wire.GetUint64(tx)
 
 		// copy to PubKeyEd25519 so we can go-wire encode properly
 		var pubKeyEd crypto.PubKeyEd25519
