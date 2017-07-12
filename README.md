@@ -32,7 +32,9 @@ Set			0x01		Key, Value
 Remove			0x02		Key
 Get			0x03		Key
 Compare and Set		0x04		Key, Compare Value, Set Value
-Validator Set Change    0x05		PubKey, Power
+Validator Set Change    0x05		PubKey, Power (uint64)
+Validator Set Read      0x06		
+Validator Set CAS       0x07		Version (uint64), PubKey, Power (uint64)	
 ```
 
 A transaction consists of a 12-byte random nonce, the type-byte, and the encoded arguments.
