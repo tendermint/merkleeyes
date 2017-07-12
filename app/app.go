@@ -2,12 +2,14 @@ package app
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"path"
 
 	abci "github.com/tendermint/abci/types"
 	"github.com/tendermint/go-crypto"
 	"github.com/tendermint/go-wire"
+	"github.com/tendermint/go-wire/data"
 	"github.com/tendermint/merkleeyes/iavl"
 	cmn "github.com/tendermint/tmlibs/common"
 	dbm "github.com/tendermint/tmlibs/db"
@@ -22,7 +24,9 @@ type MerkleEyesApp struct {
 	db     dbm.DB
 	height uint64
 
-	changes []*abci.Validator
+	validators *ValidatorSetState
+
+	changes []*abci.Validator // NOTE: go-wire encoded because thats what Tendermint needs
 }
 
 // just make sure we really are an application, if the interface
@@ -35,8 +39,48 @@ var eyesStateKey = []byte("merkleeyes:state") // Database key for merkle tree sa
 
 // MerkleEyesState contains the latest Merkle root hash and the number of times `Commit` has been called
 type MerkleEyesState struct {
-	Hash   []byte
-	Height uint64
+	Hash       []byte
+	Height     uint64
+	Validators *ValidatorSetState
+}
+
+type ValidatorSetState struct {
+	Version    uint64       `json:"version"`
+	Validators []*Validator `json:"validators"` // NOTE: non-go-wire encoded for client convenience
+}
+
+type Validator struct {
+	PubKey data.Bytes `json:"pub_key"`
+	Power  uint64     `json:"power"`
+}
+
+func (vss *ValidatorSetState) Has(v *Validator) bool {
+	for _, v_ := range vss.Validators {
+		if bytes.Equal(v_.PubKey, v.PubKey) {
+			return true
+		}
+	}
+	return false
+}
+
+func (vss *ValidatorSetState) Remove(v *Validator) {
+	vals := make([]*Validator, 0, len(vss.Validators)-1)
+	for _, v_ := range vss.Validators {
+		if !bytes.Equal(v_.PubKey, v.PubKey) {
+			vals = append(vals, v_)
+		}
+	}
+	vss.Validators = vals
+}
+
+func (vss *ValidatorSetState) Set(v *Validator) {
+	for i, v_ := range vss.Validators {
+		if bytes.Equal(v_.PubKey, v.PubKey) {
+			vss.Validators[i] = v
+			return
+		}
+	}
+	vss.Validators = append(vss.Validators, v)
 }
 
 // Transaction type bytes
@@ -46,6 +90,8 @@ const (
 	TxTypeGet           byte = 0x03
 	TxTypeCompareAndSet byte = 0x04
 	TxTypeValSetChange  byte = 0x05
+	TxTypeValSetRead    byte = 0x06
+	TxTypeValSetCAS     byte = 0x07
 
 	NonceLength = 12
 )
@@ -99,9 +145,10 @@ func NewMerkleEyesApp(dbName string, cacheSize int) *MerkleEyesApp {
 	tree.Load(eyesState.Hash)
 
 	return &MerkleEyesApp{
-		state:  NewState(tree, true),
-		db:     db,
-		height: eyesState.Height,
+		state:      NewState(tree, true),
+		db:         db,
+		height:     eyesState.Height,
+		validators: new(ValidatorSetState),
 	}
 }
 
@@ -148,8 +195,8 @@ func storeKey(key []byte) []byte {
 }
 
 func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
-	// minimum length is 12 (nonce) + 1 (type byte) + 1 (len of len) + 1 (len) + 1 (arg) = 16
-	minTxLen := NonceLength + 4
+	// minimum length is 12 (nonce) + 1 (type byte) = 13
+	minTxLen := NonceLength + 1
 	if len(tx) < minTxLen {
 		return abci.ErrEncodingError.SetLog(fmt.Sprintf("Tx length must be at least %d", minTxLen))
 	}
@@ -262,10 +309,39 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 		}
 		power := wire.GetUint64(tx)
 
-		// copy to PubKeyEd25519 so we can go-wire encode properly
-		var pubKeyEd crypto.PubKeyEd25519
-		copy(pubKeyEd[:], pubKey)
-		return app.updateValidator(&abci.Validator{pubKeyEd.Bytes(), uint64(power)})
+		return app.updateValidator(pubKey, power)
+
+	case TxTypeValSetRead:
+		b, err := json.Marshal(app.validators)
+		if err != nil {
+			return abci.ErrInternalError.SetLog(cmn.Fmt("Error marshalling validator info: %v", err))
+		}
+		return abci.OK.SetData(b).SetLog(string(b))
+
+	case TxTypeValSetCAS:
+		if len(tx) < 8 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Version number must be 8 bytes: remaining tx (%X) is %d bytes", tx, len(tx)))
+		}
+		version := wire.GetUint64(tx)
+		if app.validators.Version != version {
+			return abci.ErrUnauthorized.AppendLog(fmt.Sprintf("Version was %d, not %d", app.validators.Version, version))
+		}
+		tx = tx[8:]
+
+		pubKey, n, err := wire.GetByteSlice(tx)
+		if err != nil {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Error reading pubkey: %v", err.Error()))
+		}
+		if len(pubKey) != 32 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Pubkey must be 32 bytes: %X is %d bytes", pubKey, len(pubKey)))
+		}
+		tx = tx[n:]
+		if len(tx) != 8 {
+			return abci.ErrEncodingError.SetLog(cmn.Fmt("Power must be 8 bytes: %X is %d bytes", tx, len(tx)))
+		}
+		power := wire.GetUint64(tx)
+
+		return app.updateValidator(pubKey, power)
 
 	default:
 		return abci.ErrUnknownRequest.SetLog(cmn.Fmt("Unexpected Tx type byte %X", typeByte))
@@ -273,35 +349,33 @@ func (app *MerkleEyesApp) doTx(tree merkle.Tree, tx []byte) abci.Result {
 	return abci.OK
 }
 
-func (app *MerkleEyesApp) updateValidator(v *abci.Validator) abci.Result {
-	key := []byte("val:" + string(v.PubKey))
+func (app *MerkleEyesApp) updateValidator(pubKey []byte, power uint64) abci.Result {
+	v := &Validator{pubKey, power}
 	if v.Power == 0 {
 		// remove validator
-		if !app.state.deliverTx.Has(key) {
-			return abci.ErrUnauthorized.SetLog(cmn.Fmt("Cannot remove non-existent validator %X", key))
+		if !app.validators.Has(v) {
+			return abci.ErrUnauthorized.SetLog(cmn.Fmt("Cannot remove non-existent validator %v", v))
 		}
-		app.state.deliverTx.Remove(key)
+		app.validators.Remove(v)
 	} else {
 		// add or update validator
-		value := bytes.NewBuffer(make([]byte, 0))
-		if err := abci.WriteMessage(v, value); err != nil {
-			return abci.ErrInternalError.SetLog(cmn.Fmt("Error encoding validator: %v", err))
-		}
-		app.state.deliverTx.Set(key, value.Bytes())
+		app.validators.Set(v)
 	}
 
-	// we only update the changes array if we succesfully updated the tree
-	app.changes = append(app.changes, v)
+	// copy to PubKeyEd25519 so we can go-wire encode properly for the changes array
+	var pubKeyEd crypto.PubKeyEd25519
+	copy(pubKeyEd[:], pubKey)
+	app.changes = append(app.changes, &abci.Validator{pubKeyEd.Bytes(), power})
 
 	return abci.OK
 }
 
 func (app *MerkleEyesApp) InitChain(validators []*abci.Validator) {
 	for _, v := range validators {
-		r := app.updateValidator(v)
-		if r.IsErr() {
-			fmt.Println("Error updating validators", r)
-		}
+		// want non-go-wire encoded for the state
+		p, _ := crypto.PubKeyFromBytes(v.PubKey)
+		pubKey := p.Unwrap().(crypto.PubKeyEd25519)
+		app.validators.Set(&Validator{pubKey[:], v.Power})
 	}
 }
 
@@ -311,6 +385,9 @@ func (app *MerkleEyesApp) BeginBlock(hash []byte, header *abci.Header) {
 }
 
 func (app *MerkleEyesApp) EndBlock(height uint64) (resEndBlock abci.ResponseEndBlock) {
+	if len(app.changes) > 0 {
+		app.validators.Version++
+	}
 	return abci.ResponseEndBlock{Diffs: app.changes}
 }
 
@@ -322,8 +399,9 @@ func (app *MerkleEyesApp) Commit() abci.Result {
 	app.height++
 	if app.db != nil {
 		app.db.Set(eyesStateKey, wire.BinaryBytes(MerkleEyesState{
-			Hash:   hash,
-			Height: app.height,
+			Hash:       hash,
+			Height:     app.height,
+			Validators: app.validators,
 		}))
 	}
 
