@@ -8,9 +8,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"github.com/tendermint/tmlibs/db"
 	"github.com/tendermint/go-wire"
 	. "github.com/tendermint/tmlibs/common"
+	"github.com/tendermint/tmlibs/db"
 	. "github.com/tendermint/tmlibs/test"
 
 	"runtime"
@@ -61,6 +61,7 @@ func N(l, r interface{}) *IAVLNode {
 // Setup a deep node
 func T(n *IAVLNode) *IAVLTree {
 	d := db.NewDB("test", db.MemDBBackendStr, "")
+	ClearTreeStatus()
 	t := NewIAVLTree(0, d)
 
 	n.hashWithCount(t)
@@ -250,6 +251,7 @@ func TestRemove(t *testing.T) {
 
 	d := db.NewDB("test", "memdb", "")
 	defer d.Close()
+	ClearTreeStatus()
 	t1 := NewIAVLTree(size, d)
 
 	// insert a bunch of random nodes
@@ -456,6 +458,7 @@ func TestPersistence(t *testing.T) {
 	}
 
 	// Construct some tree and save it
+	ClearTreeStatus()
 	t1 := NewIAVLTree(0, db)
 	for key, value := range records {
 		t1.Set([]byte(key), []byte(value))
@@ -465,6 +468,7 @@ func TestPersistence(t *testing.T) {
 	hash, _ := t1.HashWithCount()
 
 	// Load a tree
+	ClearTreeStatus()
 	t2 := NewIAVLTree(0, db)
 	t2.Load(hash)
 	for key, value := range records {
@@ -507,6 +511,7 @@ func testProof(t *testing.T, proof *IAVLProof, keyBytes, valueBytes, rootHashByt
 func TestIAVLProof(t *testing.T) {
 	// Construct some random tree
 	db := db.NewMemDB()
+	ClearTreeStatus()
 	var tree *IAVLTree = NewIAVLTree(100, db)
 	for i := 0; i < 1000; i++ {
 		key, value := randstr(20), randstr(20)
@@ -535,6 +540,7 @@ func TestIAVLProof(t *testing.T) {
 
 func TestIAVLTreeProof(t *testing.T) {
 	db := db.NewMemDB()
+	ClearTreeStatus()
 	var tree *IAVLTree = NewIAVLTree(100, db)
 
 	// should get false for proof with nil root
@@ -569,6 +575,7 @@ func BenchmarkImmutableAvlTreeCLevelDB(b *testing.B) {
 	b.StopTimer()
 
 	db := db.NewDB("test", db.CLevelDBBackendStr, "./")
+	ClearTreeStatus()
 	t := NewIAVLTree(100000, db)
 	// for i := 0; i < 10000000; i++ {
 	for i := 0; i < 1000000; i++ {

@@ -6,8 +6,8 @@ import (
 
 	"golang.org/x/crypto/ripemd160"
 
-	. "github.com/tendermint/tmlibs/common"
 	"github.com/tendermint/go-wire"
+	. "github.com/tendermint/tmlibs/common"
 )
 
 // Node
@@ -522,5 +522,9 @@ func removeOrphan(t *IAVLTree, node *IAVLNode) {
 	if t.ndb == nil {
 		return
 	}
-	t.ndb.RemoveNode(t, node)
+
+	// We only orphan from the original tree, nothing else
+	if !t.copy {
+		t.ndb.RemoveNode(t, node)
+	}
 }

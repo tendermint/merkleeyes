@@ -13,8 +13,8 @@ type State struct {
 
 func NewState(tree merkle.Tree, persistent bool) State {
 	return State{
-		committed:  tree,
-		deliverTx:  tree.Copy(),
+		committed:  tree.Copy(),
+		deliverTx:  tree,
 		checkTx:    tree.Copy(),
 		persistent: persistent,
 	}
@@ -43,8 +43,8 @@ func (s *State) Commit() []byte {
 		hash = s.deliverTx.Hash()
 	}
 
-	s.committed = s.deliverTx
-	s.deliverTx = s.committed.Copy()
-	s.checkTx = s.committed.Copy()
+	s.committed = s.deliverTx.Copy()
+	s.checkTx = s.deliverTx.Copy()
+
 	return hash
 }

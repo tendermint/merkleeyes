@@ -4,12 +4,10 @@ import (
 	"os"
 	"testing"
 
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/tendermint/abci/server"
 	"github.com/tendermint/merkleeyes/app"
 	eyes "github.com/tendermint/merkleeyes/client"
-	. "github.com/tendermint/tmlibs/common"
 )
 
 var tmspAddr = "tcp://127.0.0.1:46659"
@@ -117,5 +115,7 @@ func rem(t *testing.T, cli *eyes.Client, key string) {
 func commit(t *testing.T, cli *eyes.Client, hash string) {
 	res := cli.CommitSync()
 	require.False(t, res.IsErr(), res.Error())
-	assert.Equal(t, hash, Fmt("%X", res.Data.Bytes()))
+
+	//Note: Doesn't work anymore, we're adding random nonces to the trees
+	//assert.Equal(t, hash, Fmt("%X", res.Data.Bytes()))
 }
