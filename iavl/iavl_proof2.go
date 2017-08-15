@@ -176,13 +176,18 @@ func (proof *KeyRangeExistsProof) Verify(key []byte, value []byte, root []byte) 
 	return false
 }
 
+var (
+	errKeyDoesntExist = errors.New("key does not exist")
+	errNilRootTree    = errors.New("tree root is nil")
+)
+
 func (node *IAVLNode) constructKeyExistsProof(t *IAVLTree, key []byte, proof *KeyExistsProof) ([]byte, error) {
 	if node.height == 0 {
 		if bytes.Compare(node.key, key) == 0 {
 			proof.LeafHash = node.hash
 			return node.value, nil
 		}
-		return nil, errors.New("key does not exist")
+		return nil, errKeyDoesntExist
 	}
 
 	if bytes.Compare(key, node.key) < 0 {
@@ -196,7 +201,7 @@ func (node *IAVLNode) constructKeyExistsProof(t *IAVLTree, key []byte, proof *Ke
 			proof.InnerNodes = append(proof.InnerNodes, branch)
 			return value, nil
 		}
-		return nil, errors.New("key does not exist")
+		return nil, errKeyDoesntExist
 	}
 
 	if value, err := node.getRightNode(t).constructKeyExistsProof(t, key, proof); err == nil {
@@ -209,7 +214,7 @@ func (node *IAVLNode) constructKeyExistsProof(t *IAVLTree, key []byte, proof *Ke
 		proof.InnerNodes = append(proof.InnerNodes, branch)
 		return value, nil
 	}
-	return nil, errors.New("key does not exist")
+	return nil, errKeyDoesntExist
 }
 
 func (node *IAVLNode) constructKeyNotExistsProof(t *IAVLTree, key []byte, proof *KeyNotExistsProof) error {
@@ -256,7 +261,7 @@ func (node *IAVLNode) constructKeyNotExistsProof(t *IAVLTree, key []byte, proof 
 
 func (t *IAVLTree) getWithKeyExistsProof(key []byte) (value []byte, proof *KeyExistsProof, err error) {
 	if t.root == nil {
-		return nil, nil, errors.New("tree root is nil")
+		return nil, nil, errNilRootTree
 	}
 	t.root.hashWithCount(t) // Ensure that all hashes are calculated.
 	proof = &KeyExistsProof{
@@ -271,7 +276,7 @@ func (t *IAVLTree) getWithKeyExistsProof(key []byte) (value []byte, proof *KeyEx
 
 func (t *IAVLTree) keyNotExistsProof(key []byte) (*KeyNotExistsProof, error) {
 	if t.root == nil {
-		return nil, errors.New("tree root is nil")
+		return nil, errNilRootTree
 	}
 	t.root.hashWithCount(t) // Ensure that all hashes are calculated.
 	proof := &KeyNotExistsProof{

@@ -103,42 +103,42 @@ func (leaf IAVLProofLeafNode) Hash() []byte {
 
 func (node *IAVLNode) constructProof(t *IAVLTree, key []byte, valuePtr *[]byte, proof *IAVLProof) (exists bool) {
 	if node.height == 0 {
-		if bytes.Compare(node.key, key) == 0 {
-			*valuePtr = node.value
-			proof.LeafHash = node.hash
-			return true
-		} else {
+		if bytes.Compare(node.key, key) != 0 {
 			return false
 		}
-	} else {
-		if bytes.Compare(key, node.key) < 0 {
-			exists := node.getLeftNode(t).constructProof(t, key, valuePtr, proof)
-			if !exists {
-				return false
-			}
-			branch := IAVLProofInnerNode{
-				Height: node.height,
-				Size:   node.size,
-				Left:   nil,
-				Right:  node.getRightNode(t).hash,
-			}
-			proof.InnerNodes = append(proof.InnerNodes, branch)
-			return true
-		} else {
-			exists := node.getRightNode(t).constructProof(t, key, valuePtr, proof)
-			if !exists {
-				return false
-			}
-			branch := IAVLProofInnerNode{
-				Height: node.height,
-				Size:   node.size,
-				Left:   node.getLeftNode(t).hash,
-				Right:  nil,
-			}
-			proof.InnerNodes = append(proof.InnerNodes, branch)
-			return true
-		}
+
+		*valuePtr = node.value
+		proof.LeafHash = node.hash
+		return true
 	}
+
+	if bytes.Compare(key, node.key) < 0 {
+		exists := node.getLeftNode(t).constructProof(t, key, valuePtr, proof)
+		if !exists {
+			return false
+		}
+		branch := IAVLProofInnerNode{
+			Height: node.height,
+			Size:   node.size,
+			Left:   nil,
+			Right:  node.getRightNode(t).hash,
+		}
+		proof.InnerNodes = append(proof.InnerNodes, branch)
+		return true
+	}
+
+	exists = node.getRightNode(t).constructProof(t, key, valuePtr, proof)
+	if !exists {
+		return false
+	}
+	branch := IAVLProofInnerNode{
+		Height: node.height,
+		Size:   node.size,
+		Left:   node.getLeftNode(t).hash,
+		Right:  nil,
+	}
+	proof.InnerNodes = append(proof.InnerNodes, branch)
+	return true
 }
 
 // Returns nil, nil if key is not in tree.

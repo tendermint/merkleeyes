@@ -101,13 +101,12 @@ func (node *IAVLNode) has(t *IAVLTree, key []byte) (has bool) {
 	}
 	if node.height == 0 {
 		return false
-	} else {
-		if bytes.Compare(key, node.key) < 0 {
-			return node.getLeftNode(t).has(t, key)
-		} else {
-			return node.getRightNode(t).has(t, key)
-		}
 	}
+
+	if bytes.Compare(key, node.key) < 0 {
+		return node.getLeftNode(t).has(t, key)
+	}
+	return node.getRightNode(t).has(t, key)
 }
 
 func (node *IAVLNode) get(t *IAVLTree, key []byte) (index int, value []byte, exists bool) {
@@ -117,39 +116,36 @@ func (node *IAVLNode) get(t *IAVLTree, key []byte) (index int, value []byte, exi
 			return 0, node.value, true
 		} else if cmp == -1 {
 			return 1, nil, false
-		} else {
-			return 0, nil, false
 		}
-	} else {
-		if bytes.Compare(key, node.key) < 0 {
-			return node.getLeftNode(t).get(t, key)
-		} else {
-			rightNode := node.getRightNode(t)
-			index, value, exists = rightNode.get(t, key)
-			index += node.size - rightNode.size
-			return index, value, exists
-		}
+		return 0, nil, false
 	}
+
+	if bytes.Compare(key, node.key) < 0 {
+		return node.getLeftNode(t).get(t, key)
+	}
+
+	rightNode := node.getRightNode(t)
+	index, value, exists = rightNode.get(t, key)
+	index += node.size - rightNode.size
+	return index, value, exists
 }
 
 func (node *IAVLNode) getByIndex(t *IAVLTree, index int) (key []byte, value []byte) {
 	if node.height == 0 {
 		if index == 0 {
 			return node.key, node.value
-		} else {
-			PanicSanity("getByIndex asked for invalid index")
-			return nil, nil
 		}
-	} else {
-		// TODO: could improve this by storing the
-		// sizes as well as left/right hash.
-		leftNode := node.getLeftNode(t)
-		if index < leftNode.size {
-			return leftNode.getByIndex(t, index)
-		} else {
-			return node.getRightNode(t).getByIndex(t, index-leftNode.size)
-		}
+		PanicSanity("getByIndex asked for invalid index")
+		return nil, nil
 	}
+
+	// TODO: could improve this by storing the
+	// sizes as well as left/right hash.
+	leftNode := node.getLeftNode(t)
+	if index < leftNode.size {
+		return leftNode.getByIndex(t, index)
+	}
+	return node.getRightNode(t).getByIndex(t, index-leftNode.size)
 }
 
 // NOTE: sets hashes recursively
@@ -181,28 +177,29 @@ func (node *IAVLNode) writeHashBytes(t *IAVLTree, w io.Writer) (n int, hashCount
 		// key & value
 		wire.WriteByteSlice(node.key, w, &n, &err)
 		wire.WriteByteSlice(node.value, w, &n, &err)
-	} else {
-		// left
-		if node.leftNode != nil {
-			leftHash, leftCount := node.leftNode.hashWithCount(t)
-			node.leftHash = leftHash
-			hashCount += leftCount
-		}
-		if node.leftHash == nil {
-			PanicSanity("node.leftHash was nil in writeHashBytes")
-		}
-		wire.WriteByteSlice(node.leftHash, w, &n, &err)
-		// right
-		if node.rightNode != nil {
-			rightHash, rightCount := node.rightNode.hashWithCount(t)
-			node.rightHash = rightHash
-			hashCount += rightCount
-		}
-		if node.rightHash == nil {
-			PanicSanity("node.rightHash was nil in writeHashBytes")
-		}
-		wire.WriteByteSlice(node.rightHash, w, &n, &err)
+		return
 	}
+
+	// left
+	if node.leftNode != nil {
+		leftHash, leftCount := node.leftNode.hashWithCount(t)
+		node.leftHash = leftHash
+		hashCount += leftCount
+	}
+	if node.leftHash == nil {
+		PanicSanity("node.leftHash was nil in writeHashBytes")
+	}
+	wire.WriteByteSlice(node.leftHash, w, &n, &err)
+	// right
+	if node.rightNode != nil {
+		rightHash, rightCount := node.rightNode.hashWithCount(t)
+		node.rightHash = rightHash
+		hashCount += rightCount
+	}
+	if node.rightHash == nil {
+		PanicSanity("node.rightHash was nil in writeHashBytes")
+	}
+	wire.WriteByteSlice(node.rightHash, w, &n, &err)
 	return
 }
 
@@ -242,18 +239,20 @@ func (node *IAVLNode) writePersistBytes(t *IAVLTree, w io.Writer) (n int, err er
 	if node.height == 0 {
 		// value
 		wire.WriteByteSlice(node.value, w, &n, &err)
-	} else {
-		// left
-		if node.leftHash == nil {
-			PanicSanity("node.leftHash was nil in writePersistBytes")
-		}
-		wire.WriteByteSlice(node.leftHash, w, &n, &err)
-		// right
-		if node.rightHash == nil {
-			PanicSanity("node.rightHash was nil in writePersistBytes")
-		}
-		wire.WriteByteSlice(node.rightHash, w, &n, &err)
+		return
 	}
+
+	// left
+	if node.leftHash == nil {
+		PanicSanity("node.leftHash was nil in writePersistBytes")
+	}
+	wire.WriteByteSlice(node.leftHash, w, &n, &err)
+
+	// right
+	if node.rightHash == nil {
+		PanicSanity("node.rightHash was nil in writePersistBytes")
+	}
+	wire.WriteByteSlice(node.rightHash, w, &n, &err)
 	return
 }
 
@@ -352,17 +351,15 @@ func (node *IAVLNode) remove(t *IAVLTree, key []byte) (
 func (node *IAVLNode) getLeftNode(t *IAVLTree) *IAVLNode {
 	if node.leftNode != nil {
 		return node.leftNode
-	} else {
-		return t.ndb.GetNode(t, node.leftHash)
 	}
+	return t.ndb.GetNode(t, node.leftHash)
 }
 
 func (node *IAVLNode) getRightNode(t *IAVLTree) *IAVLNode {
 	if node.rightNode != nil {
 		return node.rightNode
-	} else {
-		return t.ndb.GetNode(t, node.rightHash)
 	}
+	return t.ndb.GetNode(t, node.rightHash)
 }
 
 // NOTE: overwrites node
@@ -468,32 +465,33 @@ func (node *IAVLNode) traverseInRange(t *IAVLTree, start, end []byte, ascending 
 		return stop
 	}
 
-	if node.height > 0 {
-		if ascending {
-			// check lower nodes, then higher
-			if afterStart {
-				stop = node.getLeftNode(t).traverseInRange(t, start, end, ascending, cb)
-			}
-			if stop {
-				return stop
-			}
-			if beforeEnd {
-				stop = node.getRightNode(t).traverseInRange(t, start, end, ascending, cb)
-			}
-		} else {
-			// check the higher nodes first
-			if beforeEnd {
-				stop = node.getRightNode(t).traverseInRange(t, start, end, ascending, cb)
-			}
-			if stop {
-				return stop
-			}
-			if afterStart {
-				stop = node.getLeftNode(t).traverseInRange(t, start, end, ascending, cb)
-			}
-		}
+	if node.height <= 0 {
+		return stop
 	}
 
+	if ascending {
+		// check lower nodes, then higher
+		if afterStart {
+			stop = node.getLeftNode(t).traverseInRange(t, start, end, ascending, cb)
+		}
+		if stop {
+			return stop
+		}
+		if beforeEnd {
+			stop = node.getRightNode(t).traverseInRange(t, start, end, ascending, cb)
+		}
+	} else {
+		// check the higher nodes first
+		if beforeEnd {
+			stop = node.getRightNode(t).traverseInRange(t, start, end, ascending, cb)
+		}
+		if stop {
+			return stop
+		}
+		if afterStart {
+			stop = node.getLeftNode(t).traverseInRange(t, start, end, ascending, cb)
+		}
+	}
 	return stop
 }
 
