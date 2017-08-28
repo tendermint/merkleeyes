@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestWriteDotGraph(t *testing.T) {
+func TestWriteDOTGraph(t *testing.T) {
 	var tree *IAVLTree = NewIAVLTree(0, nil)
 	for _, ikey := range []byte{
 		0x0a, 0x11, 0x2e, 0x32, 0x50, 0x72, 0x99, 0xa1, 0xe4, 0xf7,
@@ -13,5 +13,5 @@ func TestWriteDotGraph(t *testing.T) {
 		key := []byte{ikey}
 		tree.Set(key, key)
 	}
-	WriteDotGraph(ioutil.Discard, tree, []*PathToKey{})
+	WriteDOTGraph(ioutil.Discard, tree, []*PathToKey{})
 }
