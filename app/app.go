@@ -181,9 +181,9 @@ func (app *MerkleEyesApp) DeliverTx(tx []byte) abci.Result {
 
 // CheckTx implements abci.Application
 func (app *MerkleEyesApp) CheckTx(tx []byte) abci.Result {
-	return abci.OK
-	// tree := app.state.Check()
-	// return app.doTx(tree, tx)
+	//	return abci.OK
+	tree := app.state.Check()
+	return app.doTx(tree, tx)
 }
 
 func nonceKey(nonce []byte) []byte {
