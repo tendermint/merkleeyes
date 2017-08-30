@@ -4,6 +4,30 @@
 
 A simple [ABCI application](http://github.com/tendermint/abci) serving a [merkle-tree key-value store](http://github.com/tendermint/merkleeyes/iavl) 
 
+# REPRODUCE BUG
+
+Run merkleeyes:
+
+```
+merkleeyes start --address tcp://localhost:46658 --dbName mydb
+```
+
+Run tendermint:
+
+```
+tendermint unsafe_reset_all
+tendermint node
+```
+
+Run the orphans.sh file:
+
+```
+bash orphans.sh
+```
+
+You may need to run it a few times
+
+
 # Use
 
 Merkleeyes allows inserts and removes by key, and queries by key or index.
