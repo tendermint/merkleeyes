@@ -55,11 +55,11 @@ func WriteDOTGraph(w io.Writer, tree *IAVLTree, paths []*PathToKey) {
 		}
 		shortHash := graphNode.Hash[:7]
 
-		graphNode.Label = mkLabel(node.key, 16, "sans-serif")
-		graphNode.Label += mkLabel([]byte(shortHash), 10, "monospace")
+		graphNode.Label = mkLabel(fmt.Sprintf("%x", node.key), 16, "sans-serif")
+		graphNode.Label += mkLabel(shortHash, 10, "monospace")
 
 		if node.value != nil {
-			graphNode.Label += mkLabel(node.value, 10, "sans-serif")
+			graphNode.Label += mkLabel(string(node.value), 10, "sans-serif")
 		}
 
 		if node.height == 0 {
@@ -102,6 +102,6 @@ func WriteDOTGraph(w io.Writer, tree *IAVLTree, paths []*PathToKey) {
 	}
 }
 
-func mkLabel(label []byte, pt int, face string) string {
-	return fmt.Sprintf("<font face='%s' point-size='%d'>%s</font>", face, pt, label)
+func mkLabel(label string, pt int, face string) string {
+	return fmt.Sprintf("<font face='%s' point-size='%d'>%s</font><br />", face, pt, label)
 }
