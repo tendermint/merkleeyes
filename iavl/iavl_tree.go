@@ -38,7 +38,7 @@ type IAVLTree struct {
 // NewIAVLTree constructor for both persistent and memory based trees
 func NewIAVLTree(cacheSize int, db db.DB) *IAVLTree {
 	// TODO: Will eventually be configurable
-	maxVersions := 1000
+	maxVersions := 10
 
 	if db == nil {
 		// In-memory IAVLTree
