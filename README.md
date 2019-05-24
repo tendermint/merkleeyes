@@ -4,7 +4,71 @@
 
 A simple [ABCI application](http://github.com/tendermint/abci) serving a [merkle-tree key-value store](http://github.com/tendermint/merkleeyes/iavl) 
 
+This once served as the application used for the [Jepsen testing of
+Tendermint](https://jepsen.io/analyses/tendermint-0-10-2). It is long since
+deprecated.
+
+We hope to revive it using the Cosmos-SDK.
+
+# Spec
+
+The state consists of a key-value store and a validator set. 
+The validator set contains a public key and voting power for each validator,
+and a version number that increments once in every block where the validator set changes.
+
+There are no accounts. Each transaction must contain a unique nonce.
+
+It should have the following Msg types:
+
+```
+// Set Key=Value in the store
+type MsgSet struct {
+    Key []byte
+    Value []byte
+}
+
+// Get the value stored under Key
+type MsgGet struct {
+    Key []byte
+}
+
+// Remove the Key and its value from the store
+type MsgRemove struct {
+    Key []byte
+}
+
+
+// If the value stored under Key is CompareValue, set it to SetValue
+type MsgCompareAndSet struct {
+    Key []byte
+    CompareValue []byte
+    SetValue []byte
+}
+
+// Add the Pubkey as a validator with the given Power.
+// If the Pubkey is already a validator, set the voting power to Power.
+// If Power=0, remove the validator from the set.
+type MsgValidatorSetChange struct {
+    Pubkey crypto.PubKey
+    Power int64
+}
+
+// MsgReturn the validator set
+type ValidatorSetRead struct {
+}
+
+// If Version matches the current validator set version, update the voting power for
+the given validator Pubkey.
+type MsgValidatorSetCompareAndSet struct {
+    Version int64
+    Pubkey crypto.Pubkey
+    Power int64
+}
+```
+
 # Use
+
+WARNING: This code and instructions are deprecated.
 
 Merkleeyes allows inserts and removes by key, and queries by key or index.
 Inserts and removes happen through the `DeliverTx` message, while queries happen through the `Query` message.
