@@ -8,7 +8,8 @@ This once served as the application used for the [Jepsen testing of
 Tendermint](https://jepsen.io/analyses/tendermint-0-10-2). It is long since
 deprecated.
 
-We hope to revive it using the Cosmos-SDK.
+We hope to revive it using the
+[Cosmos-SDK](https://github.com/cosmos/cosmos-sdk).
 
 # Spec
 
@@ -68,7 +69,9 @@ type MsgValidatorSetCompareAndSet struct {
 
 # Use
 
-WARNING: This code and instructions are deprecated.
+WARNING: This code and instructions are deprecated. It refers to an application
+implemented directly over the Tendermint ABCI. Applications should use the
+[Cosmos-SDK](https://github.com/cosmos/cosmos-sdk) instead.
 
 Merkleeyes allows inserts and removes by key, and queries by key or index.
 Inserts and removes happen through the `DeliverTx` message, while queries happen through the `Query` message.
